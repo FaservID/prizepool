@@ -1,0 +1,4 @@
+# URL Deployment Web App Apps Script. BUKAN link Google Sheets.
+VITE_GAS_URL=https://script.google.com/macros/s/PASTE_DEPLOYMENT_ID/exec
+# Opsional saat deploy manual ke repo GitHub Pages:
+VITE_BASE_PATH=/prizepool/
