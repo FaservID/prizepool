@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/backend.test.cjs && node tests/frontend.test.mjs"
+    "test": "node tests/backend.test.cjs && node tests/frontend.test.mjs && node --test tests/gardenbloom.test.mjs"
   },
   "dependencies": {
     "qrcode": "1.5.4",

@@ -4,10 +4,17 @@
  * Ini menghindari pembatasan CORS Google Apps Script ContentService.
  */
 const API_URL = (import.meta.env.VITE_GAS_URL || '').trim();
-export const isConfigured = /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(API_URL);
+
+// Periksa apakah URL Google Apps Script valid dan bukan placeholder
+export const isConfigured =
+  /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(API_URL) &&
+  !API_URL.includes('PASTE_DEPLOYMENT_ID');
 
 export function prizePoolRequest(action, fields = {}, password = '') {
-  if (!isConfigured) return Promise.reject(new Error('API Google Apps Script belum dikonfigurasi.'));
+
+  if (!isConfigured) {
+    return Promise.reject(new Error('API Google Apps Script belum dikonfigurasi.'));
+  }
 
   return new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
@@ -47,11 +54,7 @@ export function prizePoolRequest(action, fields = {}, password = '') {
     }
     function handleMessage(evt) {
       const data = evt.data;
-      // Google Apps Script HtmlService mungkin memakai iframe bersarang. Gunakan
-      // requestId acak 128 bit, bukan evt.source dari iframe terluar.
       if (!data || data.type !== 'NBSA_PRIZEPOOL_RESULT' || data.requestId !== requestId || completed) return;
-      // Balasan yang valid hanya dari Google Apps Script. Beberapa sandbox Google
-      // menghasilkan origin 'null'; requestId acak membatasi spoofing antar-request.
       if (evt.origin !== 'null' && !/^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|google\.com)$/i.test(evt.origin)) return;
       cleanUp();
       if (data.ok) resolve(data.data);
@@ -65,7 +68,12 @@ export function prizePoolRequest(action, fields = {}, password = '') {
 
     window.addEventListener('message', handleMessage);
     document.body.append(iframe, form);
-    try { form.submit(); } catch (err) { cleanUp(); reject(err); }
+    try {
+      form.submit();
+    } catch (err) {
+      cleanUp();
+      reject(err);
+    }
   });
 }
 

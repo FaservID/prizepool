@@ -1,208 +1,511 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isConfigured, participantUrl, prizePoolRequest } from './api.js';
-import { STATUS_NAMES, buildEoCsv, downloadText, formatDatetime, parseEoCsv } from './utils.js';
+import {
+  STATUS_NAMES,
+  buildEoCsv,
+  bulkGenerateTicketsZip,
+  canvasToJpegBlob,
+  downloadBlob,
+  downloadText,
+  formatDatetime,
+  generateQrCanvas,
+  parseEoCsv,
+  renderTicketCardToCanvas,
+} from './utils.js';
 
-const queryParams = new URLSearchParams(window.location.search);
-const qrFromUrl = queryParams.get('qr') || '';
-const initialView = queryParams.has('admin') ? 'admin' : 'participant';
+const params = new URLSearchParams(window.location.search);
+const qrFromUrl = params.get('qr') || '';
+const isAdmin = params.has('admin');
 
-function Icon({ name, size = 22 }) {
-  const props = { width:size, height:size, viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:1.8, strokeLinecap:'round', strokeLinejoin:'round' };
-  const paths = {
-    gift:<><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8s-7-1-7-4a2.5 2.5 0 0 1 5 0zM12 8s7-1 7-4a2.5 2.5 0 0 0-5 0z"/></>,
-    qr:<><rect x="2" y="2" width="8" height="8" rx="1"/><rect x="14" y="2" width="8" height="8" rx="1"/><rect x="2" y="14" width="8" height="8" rx="1"/><path d="M14 14h3v3h-3M20 14h2v2h-2M14 20h2m3-1h3v3"/></>,
-    lock:<><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
-    upload:<><path d="M12 16V3m-5 5 5-5 5 5M4 16v4h16v-4"/></>,
-    check:<><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></>,
-    sparkle:<><path d="m12 2 1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8zM19 17l.7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7z"/></>,
-    refresh:<><path d="M3 11a9 9 0 0 1 15.5-6L21 7M21 3v4h-4M21 13a9 9 0 0 1-15.5 6L3 17m0 4v-4h4"/></>,
-    arrow:<path d="M5 12h14m-6-6 6 6-6 6"/>,
-    settings:<><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2M18.4 5.6l-2.2 2.2m-8.4 8.4-2.2 2.2"/><circle cx="12" cy="12" r="3.5"/></>,
-    eye:<><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
-    print:<><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5h-2M6 14h12v7H6z"/></>,
-    file:<><path d="M4 2h11l5 5v15H4zM14 2v6h6M7 12h10M7 16h10"/></>,
-    users:<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></>,
-  };
-  return <svg {...props} aria-hidden="true">{paths[name] || paths.gift}</svg>;
+function preference(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
-function Button({children,icon,variant='primary',onClick,disabled,type='button',className=''}) {
-  return <button type={type} onClick={onClick} disabled={disabled} className={`button button-${variant} ${className}`}>{icon && <Icon name={icon} size={18}/>} {children}</button>;
+
+function Notice({ children, type = 'info' }) {
+  return children ? <div className={`notice notice-${type}`} role={type === 'error' ? 'alert' : 'status'}>{children}</div> : null;
 }
-function Notice({children,type='info'}) {
-  return children ? <div className={`notice notice-${type}`} role={type==='error'?'alert':'status'}>{children}</div> : null;
+
+function GardenFlower({ className = '', pink = false }) {
+  return <img className={className} src={`${import.meta.env.BASE_URL}garden-flower-${pink ? 'pink' : 'red'}.png`} width={pink ? 82 : 112} height={pink ? 83 : 109} alt="" aria-hidden="true" />;
 }
-function PageHeader({view,setView}) {
-  return <header className="topbar"><div className="container topbar-content">
-    <div className="brand"><div className="brand-icon"><Icon name="gift"/></div><div><strong>NBSA</strong><span>PRIZE POOL 2027</span></div></div>
-    <nav className="nav-tabs"><button className={view==='participant'?'active':''} onClick={()=>setView('participant')}>Peserta</button>
-      <button className={view==='admin'?'active':''} onClick={()=>setView('admin')}>Dashboard Admin</button></nav>
-  </div></header>;
+
+function ThemeToggle({ theme, toggleTheme }) {
+  return (
+    <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label={theme === 'dark' ? 'Gunakan tema terang' : 'Gunakan tema gelap'}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+        {theme === 'dark'
+          ? <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>
+          : <path d="M20.5 13.2A8.7 8.7 0 0 1 10.8 3.5a8.7 8.7 0 1 0 9.7 9.7Z" />}
+      </svg>
+    </button>
+  );
 }
-function ParticipantPage({info,reloadInfo}) {
-  const [checkToken,setCheckToken] = useState('');
-  const [result,setResult] = useState(null);
-  const [error,setError] = useState('');
-  const [loading,setLoading] = useState(false);
+
+function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
+  const [checkToken, setCheckToken] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [flowersPaused, setFlowersPaused] = useState(false);
+  const gardenRef = useRef(null);
+  const resultRef = useRef(null);
   const qrValid = /^[a-f0-9]{64}$/i.test(qrFromUrl);
+
+  useEffect(() => { if (result) resultRef.current?.focus(); }, [result]);
+  useEffect(() => {
+    const garden = gardenRef.current;
+    if (!garden) return;
+    const observer = new IntersectionObserver(entries => {
+      for (const { target, isIntersecting } of entries) {
+        target.classList.toggle('flower-offscreen', !isIntersecting);
+      }
+    });
+    garden.querySelectorAll('.garden-branch, .garden-petals i, .card-flower-accent').forEach(flower => observer.observe(flower));
+    const syncVisibility = () => { garden.dataset.pageHidden = String(document.hidden); };
+    syncVisibility();
+    document.addEventListener('visibilitychange', syncVisibility);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', syncVisibility);
+    };
+  }, []);
+
   async function submit(event) {
     event.preventDefault();
-    if (!qrValid) {setError('Silakan scan QR asli pada tiket yang dibagikan panitia.');return;}
-    if (!/^2027\d{3}$/.test(checkToken)) {setError('Token harus berformat 2027XXX, contoh: 2027052.');return;}
-    setLoading(true); setError(''); setResult(null);
-    try { const data = await prizePoolRequest('verify',{checkToken,token:qrFromUrl}); setResult(data); reloadInfo(); }
-    catch(e) {setError(e.message);} finally {setLoading(false);}
+    if (!qrValid) return setError('Pindai QR pada tiket fisik Anda terlebih dahulu.');
+    if (!/^2027\d{3}$/.test(checkToken)) return setError('Masukkan 7 digit token pada tiket, misalnya 2027052.');
+    setLoading(true);
+    setError('');
+    try {
+      setResult(await prizePoolRequest('verify', { checkToken, token: qrFromUrl }));
+      reloadInfo();
+    } catch (err) {
+      setError(err.message || 'Tiket gagal diperiksa. Coba lagi.');
+    } finally { setLoading(false); }
   }
-  return <>
-    <section className="hero participant-hero"><div className="small-orb orb-one"/><div className="small-orb orb-two"/><div className="container hero-content">
-      <div className="eyebrow"><span className="eyebrow-dot"/> LUCKY TICKET 2027</div><h1>{info?.title || 'NBSA Prize Pool 2027'}</h1>
-      <p>Scan QR pada tiket registrasimu, masukkan token 2027 + nomor tiga digit, lalu cek hasil Prize Pool.</p>
-      <div className="hero-pills"><span>✦ 65 Nomor Registrasi</span><span>★ 8 Berhak Ikut Prize Pool</span></div>
-    </div></section>
-    <main className="main container participant-content">
-      {!isConfigured && <Notice type="error">URL Google Apps Script belum dikonfigurasi.</Notice>}
-      {isConfigured && info?.status!=='LIVE' && <Notice>Sesi Prize Pool belum dibuka. Status: <b>{STATUS_NAMES[info?.status]||'Memuat...'}</b>. Simpan tiketmu sampai sesi dimulai.</Notice>}
-      <div className="participation-card">{!result ? <>
-        <div className="center-icon"><Icon name="qr" size={35}/></div>
-        <div className="card-heading">Cek Tiket Prize Pool</div>
-        <p className="muted center">Contoh: registrasi <b>052</b> → masukkan <b>2027052</b>.</p>
-        <div className={`qr-indicator ${qrValid?'qr-good':'qr-missing'}`}><Icon name={qrValid?'check':'qr'} size={17}/>
-          {qrValid?'QR tiket asli terdeteksi':'QR belum terdeteksi — buka melalui scan tiket'}
-        </div>
-        <form onSubmit={submit} className="participant-form"><label htmlFor="check-token">Token pengecekan (7 digit)</label>
-          <input id="check-token" type="text" inputMode="numeric" pattern="2027[0-9]{3}" maxLength={7} autoComplete="off" value={checkToken}
-            onChange={e=>setCheckToken(e.target.value.replace(/\D/g,'').slice(0,7))} placeholder="2027052" required/>
-          <Button type="submit" className="full" icon="arrow" disabled={loading||!isConfigured||!qrValid||info?.status!=='LIVE'}>{loading?'Memeriksa...':'Cek Hasil Saya'}</Button>
-        </form>
-        <Notice type="error">{error}</Notice>
-        <p className="privacy-note">Nomor registrasi dan QR harus sesuai. Hasil ditetapkan EO dan tidak berubah saat scan ulang.</p>
-      </> : <div className="result-wrap">
-        <div className={`result-circle ${result.eligible?'win':'lose'}`}><Icon name={result.eligible?'sparkle':'gift'} size={42}/></div>
-        <div className="result-kicker">{result.eligible?'SELAMAT!':'TERIMA KASIH!'}</div>
-        <h2>{result.eligible?'Anda Berhak Mengikuti Prize Pool!':'Anda Belum Beruntung'}</h2>
-        <p className="result-description">{result.eligible?'Nomor tiketmu terpilih oleh EO. Simpan tiket fisik untuk validasi panitia.':'Terima kasih telah berpartisipasi dalam NBSA Prize Pool 2027.'}</p>
-        <div className="identity"><b>REGISTRASI {result.registrationNumber}</b><span>TOKEN {result.checkToken}</span></div>
-        {result.alreadyChecked && <p className="subtle-note">Ini pengecekan ulang. Status tiket tetap sama.</p>}
-        <Button variant="secondary" icon="refresh" onClick={()=>{setResult(null);setError('')}}>Kembali ke Form</Button>
-      </div>}</div>
-      <div className="footer-hint">1 karyawan menerima 1 tiket • Tidak perlu memasukkan nama • Hasil dipilih EO</div>
-    </main>
-  </>;
-}
-function StatCard({label,value,sub,icon}) {return <div className="stat-card"><div className="stat-head"><span>{label}</span><Icon name={icon} size={20}/></div><div className="stat-value">{value}</div><div className="stat-sub">{sub}</div></div>}
 
-function AdminPage({refreshPublicInfo}) {
-  const [passwordInput,setPasswordInput] = useState('');
-  const [password,setPassword] = useState('');
-  const [data,setData] = useState(null);
-  const [busy,setBusy] = useState(false);
-  const [error,setError] = useState('');
-  const [success,setSuccess] = useState('');
-  const [search,setSearch] = useState('');
-  const [showResults,setShowResults] = useState(false);
-  const [printCards,setPrintCards] = useState(null);
-  const [printBusy,setPrintBusy] = useState(false);
-  const send = useCallback(async(action,args={},pass=password)=>{
-    setBusy(true);setError('');setSuccess('');
-    try {const v=await prizePoolRequest(action,args,pass);setData(v);refreshPublicInfo();return v;}
-    catch(e){setError(e.message);throw e;}finally{setBusy(false);}
-  },[password,refreshPublicInfo]);
-  async function login(e){e.preventDefault();try{await send('adminStats',{},passwordInput);setPassword(passwordInput);setPasswordInput('');}catch{/* pesan terlihat */}}
-  async function execute(action,question,message,args={}){
-    if(question&&!window.confirm(question))return;
-    try{await send(action,args);setSuccess(message);}catch{/* pesan terlihat */}
-  }
-  function downloadTemplate(){
-    try{downloadText('template_EO_prizepool_2027.csv',buildEoCsv(data?.tickets));setSuccess('Template CSV berhasil disiapkan untuk EO. Pilih tepat 8 TRUE, sisanya FALSE.');setError('');}
-    catch(e){setError(e.message);}
-  }
-  async function importEo(e){
-    const f=e.target.files?.[0];e.target.value='';if(!f)return;
-    try{
-      const rows=parseEoCsv(await f.text());
-      if(!window.confirm(`File valid: ${rows.filter(x=>x.selected).length} TRUE dari 65. Import hasil EO dan KUNCI permanen?`))return;
-      await send('adminImportResults',{results:rows});setSuccess('File EO berhasil diimpor. Tepat 8 TRUE, hasil dikunci.');
-    }catch(err){setError(err.message);}
-  }
-  const filtered=useMemo(()=>data?.tickets?.filter(x=>`${x.registrationNumber} ${x.checkToken}`.includes(search))||[],[data,search]);
-  async function printQr(){
-    if(data?.tickets?.length!==65)return;setPrintBusy(true);setError('');
-    try{
-      const module=await import('qrcode');const qr=module.default||module;
-      const cards=await Promise.all(data.tickets.map(async t=>({
-        ...t,src:await qr.toDataURL(participantUrl(t.token),{errorCorrectionLevel:'M',margin:1,width:240}),
-      })));
-      setPrintCards(cards);window.setTimeout(()=>window.print(),400);
-    }catch(e){setError('Tidak dapat membuat QR: '+e.message);}finally{setPrintBusy(false);}
-  }
-  return <main className="container admin-main">
-    <div className="page-intro"><div className="eyebrow dark-eyebrow">EVENT CONTROL</div><h1>Dashboard Admin</h1>
-      <p>H-1 cetak tiket • hari H bagikan • EO impor 8 TRUE • aktifkan hasil saat Prize Pool.</p></div>
-    {!isConfigured&&<Notice type="error">GitHub variable VITE_GAS_URL belum diatur.</Notice>}
-    {!password?<div className="admin-login panel"><div className="center-icon"><Icon name="lock" size={29}/></div><h2>Login Admin</h2>
-      <p className="muted center">Password diatur melalui menu Prize Pool pada Google Spreadsheet.</p>
-      <form onSubmit={login}><label htmlFor="admin-password">Password Admin</label>
-        <input id="admin-password" type="password" autoComplete="current-password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} placeholder="Masukkan password" required/>
-        <Button type="submit" className="full" disabled={busy||!isConfigured}>{busy?'Memeriksa...':'Masuk Dashboard'}</Button></form><Notice type="error">{error}</Notice>
-    </div>:<>
-      <div className="admin-top"><div className={`status-chip chip-${(data?.status||'DRAFT').toLowerCase()}`}><span className="status-dot"/>{STATUS_NAMES[data?.status]||data?.status}</div>
-        <div className="admin-top-actions"><Button variant="secondary" icon="refresh" disabled={busy} onClick={()=>send('adminStats').catch(()=>{})}>Refresh</Button>
-          <Button variant="ghost" icon="lock" onClick={()=>{setPassword('');setData(null);setShowResults(false)}}>Keluar</Button></div></div>
-      <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
-      <section className="stat-grid">
-        <StatCard label="Tiket Digenerate" value={data?.total??0} sub="Maksimal 65 tiket" icon="qr"/>
-        <StatCard label="TRUE oleh EO" value={data?.selected??0} sub="Harus tepat 8" icon="sparkle"/>
-        <StatCard label="Sudah Cek Hasil" value={data?.checked??0} sub="Nomor unik yang sudah scan" icon="users"/>
-      </section>
-      <section className="panel action-panel"><div className="section-title"><div><h2>Kontrol Acara</h2><p className="muted">Generate QR → Cetak → Unduh CSV EO → Import EO → LIVE</p></div><Icon name="settings" size={24}/></div>
-        <div className="action-grid">
-          {data?.status==='DRAFT'&&<div className="action-card important"><h3>1. Generate 65 Tiket</h3><p>Buat 65 nomor 001–065, token pengecekan 2027001–2027065, dan QR rahasia. Tidak menentukan 8 TRUE.</p>
-            <Button icon="qr" disabled={busy} onClick={()=>execute('adminGenerateTickets','Buat 65 tiket permanen sekarang? QR tidak bisa digenerate ulang tanpa spreadsheet baru.','65 tiket siap dicetak.')}>Generate 65 Tiket</Button></div>}
-          {data?.total===65&&<div className="action-card"><h3>2. Cetak 65 QR</h3><p>H-1 cetak tiket A4 bernomor 001 sampai 065. Bagikan satu tiket ke satu karyawan saat registrasi.</p>
-            <Button variant="outline" icon="print" disabled={printBusy||busy} onClick={printQr}>{printBusy?'Membuat QR...':'Cetak Semua Tiket'}</Button></div>}
-          {data?.total===65&&<div className="action-card"><h3>3. Unduh Format EO</h3><p>65 baris: nomor_registrasi, token_pengecekan, terpilih. Semua FALSE saat awal, EO ubah tepat 8 TRUE.</p>
-            <div className="button-stack"><Button variant="outline" icon="file" disabled={busy} onClick={downloadTemplate}>Download CSV EO</Button>
-            <a className="button button-secondary" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download="Template_EO_PrizePool_2027.xlsx"><Icon name="file" size={18}/> Download Excel</a></div></div>}
-          {data?.status==='TICKETS_READY'&&<div className="action-card important"><h3>4. Import Hasil EO</h3><p>Hanya CSV berisi 65 baris dengan tepat 8 TRUE diterima. Hasil dikunci setelah import.</p>
-            <label className={`button button-outline ${busy?'disabled':''}`}><Icon name="upload" size={17}/> Upload CSV EO<input hidden type="file" accept=".csv,text/csv" disabled={busy} onChange={importEo}/></label></div>}
-          {data?.status==='LOCKED'&&<div className="action-card important"><h3>5. Mulai Sesi Prize Pool</h3><p>Hasil EO sudah tersimpan, tapi belum terlihat oleh karyawan. Buka scan saat MC memberi aba-aba.</p>
-            <Button icon="check" disabled={busy} onClick={()=>execute('adminGoLive','Buka hasil Prize Pool sekarang untuk semua pemegang QR?','Prize Pool LIVE, hasil sudah dapat dicek.')}>Aktifkan Prize Pool</Button></div>}
-          {data?.status==='LIVE'&&<div className="action-card"><h3>6. Selesai</h3><p>Tutup akses pengecekan hasil setelah sesi berakhir.</p>
-            <Button variant="danger" disabled={busy} onClick={()=>execute('adminClose','Tutup sesi pengecekan hasil?','Sesi Prize Pool ditutup.')}>Tutup Sesi</Button></div>}
+  return (
+    <main id="main-content" ref={gardenRef} className="participant-main" data-flowers-paused={flowersPaused}>
+      <div className="garden-flowers" aria-hidden="true">
+        {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
+          <img key={corner} className={`garden-branch garden-${corner}`} src={`${import.meta.env.BASE_URL}garden-${corner}.png`} alt="" />
+        ))}
+        <div className="garden-petals">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</div>
+      </div>
+      <div className="participant-container">
+        <div className="event-heading">
+          <img className="hero-logo" src={`${import.meta.env.BASE_URL}pt-nbsa-logo.png`} width="50" height="88" alt="PT NBSA" />
+          <h1>Bloom & <em>Beyond</em></h1>
+          <div className="heading-divider" aria-hidden="true"><span /><i /><i /><i /><span /></div>
+          <p>{info?.title || 'NBSA Prize Pool 2027'}</p>
         </div>
-        <div className="admin-footnote"><Icon name="lock" size={15}/> File EO tidak berisi QR rahasia. Hasil 8 TRUE hanya bisa diimpor sekali dan tidak dapat diacak ulang.</div>
-      </section>
-      <section className="panel participants-panel"><div className="section-title"><div><h2>65 Nomor Registrasi</h2><p className="muted">Tidak ada nama; tiket dibagikan acak saat registrasi.</p></div>
-        <div className="table-controls"><button className="small-button" onClick={()=>setShowResults(v=>!v)}><Icon name="eye" size={15}/>{showResults?'Sembunyikan Hasil':'Lihat Status EO'}</button></div></div>
-        <input className="search-field" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari 001 atau 2027052..." aria-label="Cari nomor tiket"/>
-        <div className="table-scroll"><table><thead><tr><th>Nomor Reg.</th><th>Token Pengecekan</th><th>Sudah Cek?</th><th>Hasil EO</th></tr></thead><tbody>
-          {filtered.map(t=><tr key={t.registrationNumber}><td><b>{t.registrationNumber}</b></td><td>{t.checkToken}</td>
-            <td><span className={`table-tag ${t.checkedAt?'tag-checked':''}`}>{t.checkedAt?'Sudah':'Belum'}</span></td>
-            <td>{showResults&&['LOCKED','LIVE','CLOSED'].includes(data.status)
-              ? <span className={`table-tag ${t.eligible?'tag-winner':''}`}>{t.eligible?'TRUE':'FALSE'}</span>:'••••'}</td></tr>)}
-        </tbody></table>{filtered.length===0&&<div className="table-empty">Belum ada tiket atau pencarian tidak cocok.</div>}</div>
-        {data?.lockedAt&&<div className="locked-at">Hasil EO dikunci: {formatDatetime(data.lockedAt)}</div>}
-      </section>
-    </>}
-    {printCards&&<div className="qr-print-overlay"><div className="qr-print-toolbar"><b>Preview cetak {printCards.length} tiket</b><span>Pastikan nomor registrasi dan QR terbaca jelas.</span>
-      <Button variant="secondary" onClick={()=>setPrintCards(null)}>Tutup Preview</Button></div>
-      <div className="qr-grid">{printCards.map(c=><div key={c.registrationNumber} className="qr-print-card"><div className="qr-brand">NBSA • PRIZE POOL 2027</div>
-        <img src={c.src} alt={`QR registrasi ${c.registrationNumber}`}/><strong>REG. {c.registrationNumber}</strong>
-        <small>Scan saat Prize Pool • token: 2027 + nomor reg.</small></div>)}</div></div>}
-  </main>;
+        <section className="card-ticket" aria-labelledby="ticket-title">
+          <GardenFlower pink className="card-flower-accent" />
+          {!result ? (
+            <>
+              <h2 id="ticket-title">Cek Tiket Prize Pool</h2>
+              <p className="card-instruction">Pindai QR pada tiket, lalu masukkan token untuk melihat hasil pilihan EO.</p>
+              {!isConfigured ? (
+                <Notice type="error">
+                  <svg className="notice-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="currentColor" /><path d="M12 6v7m0 3v2" stroke="white" strokeWidth="2" /></svg>
+                  <span>Layanan belum terhubung. Hubungi panitia untuk mengaktifkan pengecekan tiket.</span>
+                </Notice>
+              ) : (
+                <div className="session-status">
+                  <p role="status">
+                    {infoLoading ? 'Memuat status sesi…' : infoError ? 'Status sesi belum tersedia.' : info?.status === 'LIVE'
+                      ? 'Sesi dibuka. Tiket Anda bisa diperiksa.' : info?.status === 'CLOSED'
+                        ? 'Sesi pengecekan sudah ditutup.' : `Sesi belum dibuka. ${STATUS_NAMES[info?.status] || 'Menunggu panitia'}.`}
+                  </p>
+                  <button type="button" className="text-button" disabled={infoLoading} onClick={reloadInfo}>Perbarui status sesi</button>
+                </div>
+              )}
+              <Notice type="error">{infoError}</Notice>
+              <p id="qr-context" className="qr-context">{qrValid ? 'QR diterima dari tautan. Kecocokan tiket diperiksa saat dikirim.' : 'Buka halaman ini melalui QR pada tiket fisik Anda.'}</p>
+              <form onSubmit={submit} className="participant-form" aria-busy={loading}>
+                <div className="form-group">
+                  <label htmlFor="check-token">Token pengecekan</label>
+                  <div className="token-field">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="8" cy="18" r="5.5" /><path d="m12 14 13-12m-5 5 5 5m-9-1 4 4" /></svg>
+                    <input id="check-token" className="input-field token-input" type="text" inputMode="numeric" pattern="2027[0-9]{3}" maxLength={7} autoComplete="off" required
+                      aria-describedby="qr-context" value={checkToken} placeholder="Masukkan token pada tiket" onChange={e => setCheckToken(e.target.value.replace(/\D/g, '').slice(0, 7))} />
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary btn-full" disabled={loading || !isConfigured || !qrValid || info?.status !== 'LIVE'}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="m15 15 6 6" /></svg>
+                  {loading ? 'Memeriksa tiket…' : 'Periksa tiket saya'}
+                </button>
+              </form>
+              <Notice type="error">{error}</Notice>
+              <p className="ticket-footnote">Simpan tiket fisik Anda untuk ditunjukkan kepada panitia.</p>
+            </>
+          ) : (
+            <div className="result-card">
+              <h2 id="ticket-title" ref={resultRef} tabIndex={-1}>{result.eligible ? 'Tiket Anda terpilih' : 'Tiket Anda belum terpilih'}</h2>
+              <p className="card-instruction">{result.eligible ? 'Anda berhak mengikuti Prize Pool Garden Bloom. Tunjukkan tiket fisik saat panitia memanggil nomor Anda.' : 'Nomor Anda tidak termasuk 8 tiket pilihan EO. Terima kasih telah ikut meramaikan Garden Bloom.'}</p>
+              <dl className="ticket-identity">
+                <div><dt>Nomor registrasi</dt><dd>{result.registrationNumber}</dd></div>
+                <div><dt>Token pengecekan</dt><dd>{result.checkToken}</dd></div>
+              </dl>
+              {result.alreadyChecked && <p className="field-help">Tiket ini sudah pernah diperiksa. Hasilnya tetap sama.</p>}
+              <button type="button" className="btn btn-outline" onClick={() => { setResult(null); setError(''); }}>Periksa ulang tiket ini</button>
+            </div>
+          )}
+          <div className="ticket-ornament" aria-hidden="true"><span /><GardenFlower /><span /></div>
+        </section>
+      </div>
+    </main>
+  );
 }
-export default function App(){
-  const [view,setView]=useState(initialView);
-  const [info,setInfo]=useState(null);
-  const [infoError,setInfoError]=useState('');
-  const reloadInfo=useCallback(()=>{
-    if(!isConfigured)return;
-    prizePoolRequest('publicInfo').then(v=>{setInfo(v);setInfoError('');}).catch(e=>setInfoError(e.message));
-  },[]);
-  useEffect(()=>reloadInfo(),[reloadInfo]);
-  function switchView(next){setView(next);const url=new URL(window.location.href);if(next==='admin')url.searchParams.set('admin','1');else url.searchParams.delete('admin');window.history.replaceState(null,'',url);}
-  return <div className="app-shell"><PageHeader view={view} setView={switchView}/>
-    {infoError&&isConfigured&&<div className="container"><Notice type="error">Tidak dapat mengakses Apps Script: {infoError}</Notice></div>}
-    {view==='admin'?<AdminPage refreshPublicInfo={reloadInfo}/>:<ParticipantPage info={info} reloadInfo={reloadInfo}/>}
-    <footer className="site-footer"><div className="container">© NBSA Prize Pool 2027 <span>•</span> 1 tiket per karyawan</div></footer>
-  </div>;
+
+function AdminPage({ refreshPublicInfo }) {
+  const [passwordInput, setPasswordInput] = useState('');
+  const [password, setPassword] = useState('');
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [search, setSearch] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const [companyName, setCompanyName] = useState(() => {
+    const saved = preference('nb_company_name', '');
+    return saved === 'PT NUSANTARA BAKTI SEJAHTERA' ? '' : saved.slice(0, 80);
+  });
+  const [logoDataUrl, setLogoDataUrl] = useState(() => preference('nb_logo_data', ''));
+  const [logoSizePercent, setLogoSizePercent] = useState(() => {
+    const saved = Number(preference('nb_logo_size', '16'));
+    return Number.isFinite(saved) ? Math.max(10, Math.min(18, saved)) : 16;
+  });
+  const [badgeShape, setBadgeShape] = useState(() => preference('nb_badge_shape', 'circle') === 'square' ? 'square' : 'circle');
+  const [previewQrSrc, setPreviewQrSrc] = useState('');
+  const [previewError, setPreviewError] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(true);
+  const [logoLoading, setLogoLoading] = useState(false);
+  const [exporting, setExporting] = useState('');
+  const [bulkProgress, setBulkProgress] = useState(0);
+  const [modalCards, setModalCards] = useState([]);
+  const printRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nb_company_name', companyName);
+      localStorage.setItem('nb_logo_size', String(logoSizePercent));
+      localStorage.setItem('nb_badge_shape', badgeShape);
+      if (logoDataUrl) localStorage.setItem('nb_logo_data', logoDataUrl);
+      else localStorage.removeItem('nb_logo_data');
+    } catch { /* Preferensi opsional. Ekspor tetap bekerja tanpa penyimpanan browser. */ }
+  }, [companyName, logoSizePercent, badgeShape, logoDataUrl]);
+
+  useEffect(() => {
+    let canceled = false;
+    setPreviewLoading(true);
+    setPreviewError('');
+    setPreviewQrSrc('');
+    generateQrCanvas(participantUrl('0123456789abcdef'.repeat(4)), { size: 512, logoSrc: logoDataUrl, logoSizePercent, badgeShape })
+      .then(canvas => { if (!canceled) setPreviewQrSrc(canvas.toDataURL('image/png')); })
+      .catch(err => { if (!canceled) setPreviewError(err.message || 'Pratinjau gagal dibuat. Hapus atau unggah ulang logo.'); })
+      .finally(() => { if (!canceled) setPreviewLoading(false); });
+    return () => { canceled = true; };
+  }, [logoDataUrl, logoSizePercent, badgeShape]);
+
+  useEffect(() => {
+    if (!modalCards.length) return;
+    const dialog = printRef.current;
+    const previousFocus = document.activeElement;
+    dialog.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [modalCards]);
+
+  const qrOptions = { size: 1024, logoSrc: logoDataUrl, logoSizePercent, badgeShape };
+  const brandingOptions = { companyName: companyName.trim(), eventTitle: 'NBSA PRIZE POOL 2027', eventSubtitle: 'Bloom & Beyond' };
+  const exportDisabled = busy || !!exporting || logoLoading || previewLoading || !!previewError;
+
+  const send = useCallback(async (action, args = {}, pass = password) => {
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await prizePoolRequest(action, args, pass);
+      setData(response);
+      refreshPublicInfo();
+      return response;
+    } catch (err) {
+      setError(err.message || 'Permintaan gagal. Coba lagi.');
+      throw err;
+    } finally { setBusy(false); }
+  }, [password, refreshPublicInfo]);
+
+  async function login(event) {
+    event.preventDefault();
+    try {
+      await send('adminStats', {}, passwordInput);
+      setPassword(passwordInput);
+      setPasswordInput('');
+    } catch { /* Pesan berasal dari send. */ }
+  }
+
+  async function execute(action, question, message) {
+    if (!window.confirm(question)) return;
+    try { await send(action); setSuccess(message); } catch { /* Pesan berasal dari send. */ }
+  }
+
+  function downloadTemplate() {
+    try {
+      downloadText('template_EO_prizepool_2027.csv', buildEoCsv(data?.tickets));
+      setSuccess('CSV EO disiapkan. Isi tepat 8 TRUE, sisanya FALSE.');
+      setError('');
+    } catch (err) { setError(err.message); }
+  }
+
+  async function importEo(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError('');
+    setSuccess('');
+    try {
+      if (file.size > 1024 * 1024) throw new Error('CSV terlalu besar. Batas 1 MB untuk 65 baris tiket.');
+      const rows = parseEoCsv(await file.text());
+      if (!window.confirm('CSV valid: tepat 8 TRUE dari 65 tiket. Impor dan kunci hasil permanen? Tindakan ini tidak dapat diulang.')) return;
+      await send('adminImportResults', { results: rows });
+      setSuccess('Hasil EO dikunci. Sesi pengecekan belum dibuka.');
+    } catch (err) { setError(err.message || 'CSV gagal diimpor. Periksa isi berkas.'); }
+  }
+
+  async function handleLogoUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError('');
+    setSuccess('');
+    setLogoLoading(true);
+    try {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Pilih logo PNG, JPG, atau WebP.');
+      if (!file.size || file.size > 2 * 1024 * 1024) throw new Error('Ukuran logo harus 1 byte sampai 2 MB.');
+      const source = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Berkas logo gagal dibaca. Coba unggah ulang.'));
+        reader.onabort = () => reject(new Error('Pembacaan logo dibatalkan.'));
+        reader.readAsDataURL(file);
+      });
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth > 4096 || image.naturalHeight > 4096) throw new Error('Dimensi logo maksimal 4096 × 4096 piksel.');
+      setLogoDataUrl(source);
+      setSuccess('Logo dimuat. Uji pindai hasil cetak sebelum mencetak seluruh tiket.');
+    } catch (err) { setError(err.message || 'Logo gagal dibaca. Pilih gambar lain.'); }
+    finally { setLogoLoading(false); }
+  }
+
+  async function handleBulkDownloadZip() {
+    setExporting('zip');
+    setBulkProgress(0);
+    setError('');
+    setSuccess('');
+    try {
+      const blob = await bulkGenerateTicketsZip(data?.tickets, participantUrl, qrOptions, brandingOptions, current => setBulkProgress(current));
+      downloadBlob(blob, 'Tiket_GardenBloom_65_JPG.zip');
+      setSuccess('ZIP siap: 65 berkas JPG individual, masing-masing 1440 × 2080 piksel.');
+    } catch (err) { setError(`Ekspor dibatalkan. ${err.message}`); }
+    finally { setExporting(''); }
+  }
+
+  async function downloadSingleCardJpg(ticket) {
+    setExporting(ticket.registrationNumber);
+    setError('');
+    setSuccess('');
+    try {
+      const qr = await generateQrCanvas(participantUrl(ticket.token), qrOptions);
+      const canvas = await renderTicketCardToCanvas(ticket, qr, brandingOptions);
+      downloadBlob(await canvasToJpegBlob(canvas, 0.95), `Tiket_GardenBloom_${ticket.registrationNumber}.jpg`);
+      setSuccess(`JPG tiket ${ticket.registrationNumber} siap diunduh.`);
+    } catch (err) { setError(`JPG gagal dibuat. ${err.message}`); }
+    finally { setExporting(''); }
+  }
+
+  async function openPrintPreview() {
+    if (data?.tickets?.length !== 65) return setError('Siapkan 65 tiket terlebih dahulu.');
+    setExporting('print');
+    setError('');
+    setSuccess('');
+    try {
+      const cards = [];
+      for (const ticket of data.tickets) {
+        const canvas = await generateQrCanvas(participantUrl(ticket.token), qrOptions);
+        cards.push({ ...ticket, src: canvas.toDataURL('image/png') });
+      }
+      setModalCards(cards);
+    } catch (err) { setError(`Pratinjau cetak gagal. ${err.message}`); }
+    finally { setExporting(''); }
+  }
+
+  const filtered = useMemo(() => data?.tickets?.filter(ticket => `${ticket.registrationNumber} ${ticket.checkToken}`.includes(search.trim())) || [], [data, search]);
+
+  return (
+    <main id="main-content" className="admin-main">
+      <div className="garden-flowers" aria-hidden="true">
+        {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
+          <img key={corner} className={`garden-branch garden-${corner}`} src={`${import.meta.env.BASE_URL}garden-${corner}.png`} alt="" />
+        ))}
+      </div>
+      <div className={`container admin-container${password ? '' : ' admin-login-container'}`}>
+      <header className="event-heading admin-header">
+        <h1>Bloom & <em>Beyond</em></h1>
+        <div className="heading-divider" aria-hidden="true"><span /><i /><i /><i /><span /></div>
+        <p>Panitia Prize Pool · NBSA Prize Pool 2027</p>
+      </header>
+      {!isConfigured && <Notice type="error">Backend belum terhubung. Atur VITE_GAS_URL dengan URL deployment Google Apps Script.</Notice>}
+      {!password ? (
+        <section className="admin-login card-ticket" aria-labelledby="login-title">
+          <GardenFlower pink className="card-flower-accent" />
+          <h2 id="login-title">Masuk panitia</h2><p className="card-instruction">Gunakan password admin yang diatur melalui Google Spreadsheet acara.</p>
+          <form onSubmit={login} className="participant-form">
+            <div className="form-group"><label htmlFor="admin-password">Password admin</label><input id="admin-password" className="input-field" type="password" autoComplete="current-password" required value={passwordInput} onChange={e => setPasswordInput(e.target.value)} /></div>
+            <button type="submit" className="btn btn-primary btn-full" disabled={busy || !isConfigured}>{busy ? 'Memverifikasi…' : 'Masuk'}</button>
+          </form>
+          <Notice type="error">{error}</Notice>
+          <div className="ticket-ornament" aria-hidden="true"><span /><GardenFlower /><span /></div>
+        </section>
+      ) : (
+        <>
+          <div className="admin-top-bar">
+            <p role="status">Status sesi: <strong>{STATUS_NAMES[data?.status] || data?.status}</strong></p>
+            <div className="button-row">
+              <button type="button" className="btn btn-outline" disabled={busy || !!exporting} onClick={() => send('adminStats').catch(() => {})}>{busy ? 'Memuat…' : 'Segarkan data'}</button>
+              <button type="button" className="text-button" disabled={busy || !!exporting} onClick={() => { setPassword(''); setData(null); setShowResults(false); setError(''); setSuccess(''); }}>Keluar</button>
+            </div>
+          </div>
+          <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
+          <dl className="stats-grid" aria-label="Jumlah tiket">
+            <div><dt>Tiket tersedia</dt><dd>{data?.total ?? 0}<span> / 65</span></dd></div>
+            <div><dt>Terpilih EO</dt><dd>{data?.selected ?? 0}<span> / 8</span></dd></div>
+            <div><dt>Sudah diperiksa</dt><dd>{data?.checked ?? 0}<span> / 65</span></dd></div>
+          </dl>
+          <section className="panel" aria-labelledby="studio-title">
+            <div className="section-heading"><h2 id="studio-title">Studio tiket</h2><p>Tambahkan logo perusahaan, lalu unduh JPG atau cetak lembar A4.</p></div>
+            <div className="qr-studio-grid">
+              <fieldset className="studio-controls" disabled={busy || !!exporting || logoLoading}>
+                <legend className="sr-only">Pengaturan logo dan ekspor</legend>
+                <div className="form-group"><label htmlFor="company-name">Nama perusahaan <span className="optional">(opsional)</span></label><input id="company-name" className="input-field" type="text" maxLength={80} value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Nama yang dicetak pada tiket" /></div>
+                <div className="form-group">
+                  <label htmlFor="logo-upload">Logo di tengah QR</label>
+                  <input id="logo-upload" className="file-input" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="logo-help" onChange={handleLogoUpload} />
+                  <p id="logo-help" className="field-help">PNG, JPG, atau WebP. Maksimal 2 MB dan 4096 × 4096 piksel.</p>
+                  {logoLoading && <p role="status">Membaca logo…</p>}
+                  {logoDataUrl && <button type="button" className="text-button reset-logo" onClick={() => { setLogoDataUrl(''); setSuccess('Logo dihapus. QR dicetak tanpa logo.'); }}>Hapus logo</button>}
+                </div>
+                <div className="form-group">
+                  <label htmlFor="logo-size">Ukuran logo: <output htmlFor="logo-size">{logoSizePercent}%</output></label>
+                  <input id="logo-size" className="range-input" type="range" min="10" max="18" step="1" value={logoSizePercent} onChange={e => setLogoSizePercent(Number(e.target.value))} aria-describedby="size-help" />
+                  <p id="size-help" className="field-help">10–18% dari lebar pola QR. Gunakan ukuran kecil untuk menjaga keterbacaan.</p>
+                </div>
+                <fieldset className="shape-options"><legend>Bentuk latar logo</legend>
+                  <label><input type="radio" name="logo-shape" value="circle" checked={badgeShape === 'circle'} onChange={() => setBadgeShape('circle')} /> Lingkaran</label>
+                  <label><input type="radio" name="logo-shape" value="square" checked={badgeShape === 'square'} onChange={() => setBadgeShape('square')} /> Kotak membulat</label>
+                </fieldset>
+                <div className="button-row export-actions">
+                  <button type="button" className="btn btn-primary" disabled={data?.tickets?.length !== 65 || exportDisabled} onClick={handleBulkDownloadZip}>{exporting === 'zip' ? 'Membuat ZIP…' : 'Unduh 65 JPG (.zip)'}</button>
+                  <button type="button" className="btn btn-outline" disabled={data?.tickets?.length !== 65 || exportDisabled} onClick={openPrintPreview}>{exporting === 'print' ? 'Menyiapkan cetak…' : 'Pratinjau cetak A4'}</button>
+                </div>
+                {exporting === 'zip' && <div className="export-progress"><label htmlFor="bulk-progress">Membuat JPG: {bulkProgress} / 65</label><progress id="bulk-progress" max={65} value={bulkProgress} /></div>}
+              </fieldset>
+              <figure className="studio-preview">
+                <div className="qr-preview-image" aria-busy={previewLoading}>
+                  {previewQrSrc ? <img src={previewQrSrc} alt="Pratinjau desain QR dengan pengaturan logo saat ini, bukan tiket peserta" /> : <p role="status">{previewLoading ? 'Menyiapkan QR…' : 'Pratinjau tidak tersedia'}</p>}
+                </div>
+                <figcaption>Pratinjau desain, bukan tiket peserta.<br />Koreksi QR level H. Uji pindai hasil cetak dengan logo Anda sebelum mencetak semua tiket.</figcaption>
+                <Notice type="error">{previewError}</Notice>
+              </figure>
+            </div>
+          </section>
+          <section className="panel" aria-labelledby="flow-title">
+            <div className="section-heading"><h2 id="flow-title">Pengaturan sesi</h2><p>Hasil EO diimpor sekali. Pembukaan dan penutupan sesi tetap dikendalikan panitia.</p></div>
+            <div className="session-actions">
+              {data?.status === 'DRAFT' && <div><h3>Siapkan 65 tiket</h3><p>Nomor 001–065, token 2027001–2027065, dan QR unik. Belum ada tiket terpilih.</p><button type="button" className="btn btn-primary" disabled={busy || !!exporting} onClick={() => execute('adminGenerateTickets', 'Buat 65 tiket sekarang? Tindakan ini permanen pada spreadsheet ini.', '65 tiket disiapkan.')}>Buat 65 tiket</button></div>}
+              {data?.total === 65 && <div><h3>Format hasil EO</h3><p>EO mengisi tepat 8 TRUE dari 65 baris. Simpan hasil akhir sebagai CSV.</p><div className="button-row"><button type="button" className="btn btn-outline" onClick={downloadTemplate}>Unduh CSV EO</button><a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh Excel</a></div></div>}
+              {data?.status === 'TICKETS_READY' && <div><h3>Impor dan kunci hasil</h3><p>Periksa kembali berkas EO. Hasil yang sudah diimpor tidak dapat diganti.</p><label htmlFor="eo-csv">CSV hasil EO</label><input id="eo-csv" className="file-input" type="file" accept=".csv,text/csv" disabled={busy || !!exporting} onChange={importEo} /></div>}
+              {data?.status === 'IMPORTING' && <div><h3>Impor sedang diproses</h3><p>Tunggu hingga selesai, lalu segarkan data. Jangan mengimpor ulang.</p></div>}
+              {data?.status === 'LOCKED' && <div><h3>Buka pengecekan peserta</h3><p>8 tiket terpilih sudah dikunci. Buka sesi setelah MC memberi aba-aba.</p><button type="button" className="btn btn-primary" disabled={busy || !!exporting} onClick={() => execute('adminGoLive', 'Buka pengecekan hasil untuk seluruh peserta sekarang?', 'Sesi dibuka. Peserta dapat memeriksa tiket.')}>Buka sesi pengecekan</button></div>}
+              {data?.status === 'LIVE' && <div><h3>Tutup sesi</h3><p>Peserta tidak dapat memeriksa tiket setelah sesi ditutup. Sesi tidak bisa dibuka kembali.</p><button type="button" className="btn btn-danger" disabled={busy || !!exporting} onClick={() => execute('adminClose', 'Tutup sesi pengecekan? Sesi tidak dapat dibuka kembali.', 'Sesi pengecekan ditutup.')}>Tutup sesi pengecekan</button></div>}
+              {data?.status === 'CLOSED' && <div><h3>Sesi selesai</h3><p>Pengecekan peserta ditutup. Data tiket dan hasil EO tetap tersimpan.</p></div>}
+            </div>
+          </section>
+          <section className="panel" aria-labelledby="tickets-title">
+            <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket memakai nomor, tanpa nama karyawan.</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil EO' : 'Tampilkan hasil EO'}</button></div>
+            <div className="table-toolbar"><div className="search-field"><label htmlFor="ticket-search">Cari nomor atau token</label><input id="ticket-search" className="input-field" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="052 atau 2027052" /></div><p className="field-help" role="status">{filtered.length} dari {data?.tickets?.length || 0} tiket</p></div>
+            <div className="table-scroll" role="region" aria-label="Daftar tiket peserta, geser untuk melihat seluruh kolom" tabIndex={0}>
+              <table><caption className="sr-only">Nomor registrasi, token pengecekan, status pengecekan, dan hasil EO</caption><thead><tr><th scope="col">Nomor</th><th scope="col">Token</th><th scope="col">Pengecekan</th><th scope="col">Hasil EO</th><th scope="col">Unduh</th></tr></thead><tbody>
+                {filtered.map(ticket => <tr key={ticket.registrationNumber}><th scope="row">{ticket.registrationNumber}</th><td className="tabular">{ticket.checkToken}</td><td>{ticket.checkedAt ? 'Sudah diperiksa' : 'Belum diperiksa'}</td><td>{showResults && ['LOCKED', 'LIVE', 'CLOSED'].includes(data.status) ? ticket.eligible ? 'Terpilih (TRUE)' : 'Tidak terpilih (FALSE)' : 'Disembunyikan'}</td><td><button type="button" className="btn btn-outline row-download" disabled={exportDisabled} onClick={() => downloadSingleCardJpg(ticket)} aria-label={`Unduh JPG tiket ${ticket.registrationNumber}`}>{exporting === ticket.registrationNumber ? 'Membuat…' : 'JPG'}</button></td></tr>)}
+                {!filtered.length && <tr><td colSpan={5}>Tidak ada tiket yang cocok.</td></tr>}
+              </tbody></table>
+            </div>
+            {data?.lockedAt && <p className="field-help lock-time">Hasil EO dikunci: {formatDatetime(data.lockedAt)}</p>}
+          </section>
+          <dialog ref={printRef} className="print-dialog" aria-labelledby="print-title" onCancel={() => setModalCards([])} onClose={() => setModalCards([])}>
+            <div className="print-toolbar"><div><h2 id="print-title">Cetak {modalCards.length} tiket</h2><p>A4 potret, 4 tiket per lembar. Skala 100%, tanpa header/footer browser.</p></div><div className="button-row"><button type="button" className="btn btn-primary" onClick={() => window.print()}>Cetak A4</button><button type="button" className="btn btn-outline" autoFocus onClick={() => setModalCards([])}>Tutup pratinjau</button></div></div>
+            <div className="print-pages">
+              {Array.from({ length: Math.ceil(modalCards.length / 4) }, (_, page) => <div className="ticket-print-page" key={page}>
+                {modalCards.slice(page * 4, page * 4 + 4).map(ticket => <article className="print-ticket" key={ticket.registrationNumber}>
+                  {companyName.trim() && <p className="print-company">{companyName.trim()}</p>}
+                  <p className="print-event">NBSA Prize Pool 2027</p><h3>Garden Bloom</h3>
+                  <img src={ticket.src} className="print-qr" alt={`QR tiket ${ticket.registrationNumber}`} />
+                  <p className="print-registration">No. {ticket.registrationNumber}</p><p className="print-token">Token {ticket.checkToken}</p>
+                  <p className="print-instruction">Pindai QR, lalu masukkan token.<br />Simpan tiket hingga sesi selesai.</p>
+                </article>)}
+              </div>)}
+            </div>
+          </dialog>
+        </>
+      )}
+      </div>
+    </main>
+  );
+}
+
+export default function App() {
+  const [info, setInfo] = useState(null);
+  const [infoError, setInfoError] = useState('');
+  const [infoLoading, setInfoLoading] = useState(isConfigured);
+  const [theme, setTheme] = useState(() => {
+    const saved = preference('nb_theme', '');
+    return saved === 'dark' || saved === 'light' ? saved : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('nb_theme', theme); } catch { /* Preferensi opsional. */ }
+  }, [theme]);
+  const reloadInfo = useCallback(async () => {
+    if (!isConfigured) return;
+    setInfoLoading(true);
+    try { setInfo(await prizePoolRequest('publicInfo')); setInfoError(''); }
+    catch (err) { setInfoError(err.message || 'Status gagal dimuat. Perbarui status untuk mencoba lagi.'); }
+    finally { setInfoLoading(false); }
+  }, []);
+  useEffect(() => { reloadInfo(); }, [reloadInfo]);
+
+  return (
+    <div className="app-shell">
+      <a href="#main-content" className="skip-link">Lewati ke konten</a>
+      {isAdmin && (
+        <header className="topbar">
+          <div className="container topbar-brand">
+            <img src={`${import.meta.env.BASE_URL}pt-nbsa-logo.png`} width="48" height="48" alt="" />
+            <div><strong>NBSA</strong><span>Garden Bloom</span></div>
+          </div>
+        </header>
+      )}
+      {isAdmin ? <AdminPage refreshPublicInfo={reloadInfo} /> : <ParticipantPage info={info} infoError={infoError} infoLoading={infoLoading} reloadInfo={reloadInfo} />}
+      <footer className="site-footer">
+        <span>NBSA Prize Pool 2027 <span aria-hidden="true">·</span> Bloom & Beyond</span>
+      </footer>
+    </div>
+  );
 }
