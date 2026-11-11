@@ -40,9 +40,23 @@ run('setupProject()');
 props.set('ADMIN_SALT','SALT');
 props.set('ADMIN_HASH',run('hashText_("SALT|testing-password-very-long")'));
 props.set('ALLOWED_ORIGINS','https://faservid.github.io');
+const snapshot = () => JSON.stringify([...tabs].map(([name, sheet]) => [name, sheet.rows]));
+assert.equal(run('publicInfo_().maxParticipants'), 65);
+assert.equal(run('getSetting_("TICKET_COUNT")'), '');
+for (const ticketCount of [null, true, false, '', ' ', 7, 1000, 8.5, NaN, Infinity, '8.5', '1e2', '100abc', [], {}]) {
+  ctx.payload = { action: 'adminGenerateTickets', password: 'testing-password-very-long', ticketCount };
+  const before = snapshot();
+  assert.throws(() => run('dispatch_(payload)'), /bilangan bulat 8–999/);
+  assert.equal(snapshot(), before, 'Invalid count must not change settings, tickets or audit');
+}
 const initial=run('generateTickets_()');
 assert.equal(initial.status,'TICKETS_READY');
 assert.equal(initial.total,65);
+assert.equal(initial.maxParticipants,65);
+assert.equal(run('getSetting_("TICKET_COUNT")'), '65');
+// Acara lama tanpa key TICKET_COUNT tetap dapat memakai seluruh lifecycle 65 tiket.
+tabs.get('Settings').rows = tabs.get('Settings').rows.filter(row => row[0] !== 'TICKET_COUNT');
+assert.equal(run('publicInfo_().maxParticipants'), 65);
 assert.equal(initial.selected,0);
 assert.equal(initial.tickets[0].registrationNumber,'001');
 assert.equal(initial.tickets[0].checkToken,'2027001');
@@ -90,4 +104,60 @@ ctx.wrongOrigin={parameter:{...request.parameter,origin:'https://attacker.exampl
 assert.ok(!run('doPost(wrongOrigin)').html.includes('NBSA_PRIZEPOOL_RESULT'));
 run("changeStatus_('LIVE','CLOSED')");
 assert.throws(()=>run('verifyTicket_(verifyArgs)'),/ditutup/);
-console.log('PASS backend: setup, 65 QR, 2027+001..065, 0 initial TRUE, validasi EO 8/65, import sekali, LIVE, QR pairing, scan ulang, admin, CLOSED.');
+function admin(action, args = {}) {
+  ctx.payload = { action, password: 'testing-password-very-long', ...args };
+  return run('dispatch_(payload)');
+}
+for (const requestedCount of [8, '100', 999]) {
+  // Spreadsheet terisolasi di memory, tidak menyentuh acara nyata.
+  tabs.clear();
+  run('setupProject()');
+  const count = Number(requestedCount);
+  const generated = admin('adminGenerateTickets', { ticketCount: requestedCount });
+  assert.equal(generated.total, count);
+  assert.equal(generated.maxParticipants, count);
+  assert.equal(generated.selected, 0);
+  assert.equal(generated.tickets.at(-1).registrationNumber, String(count).padStart(3, '0'));
+  assert.equal(generated.tickets.at(-1).checkToken, `2027${String(count).padStart(3, '0')}`);
+  assert.equal(new Set(generated.tickets.map(ticket => ticket.token)).size, count);
+  assert.ok(generated.tickets.every(ticket => /^[a-f0-9]{64}$/.test(ticket.token)));
+  assert.equal(run('getSetting_("TICKET_COUNT")'), String(count));
+  run('setupProject()');
+  assert.equal(run('publicInfo_().maxParticipants'), count, 'Setup must preserve configuration');
+  let before = snapshot();
+  assert.throws(() => admin('adminGenerateTickets', { ticketCount: 65 }), /DRAFT/);
+  assert.equal(snapshot(), before, 'Regeneration must not change count or QR');
+  const results = generated.tickets.map((ticket, i) => ({
+    registrationNumber: ticket.registrationNumber, checkToken: ticket.checkToken, selected: i < 8,
+  }));
+  assert.throws(() => admin('adminImportResults', { results: results.slice(0, -1) }), new RegExp(`tepat ${count} baris`));
+  assert.throws(() => admin('adminImportResults', { results: results.map((row, i) => ({ ...row, selected: i < 7 })) }), /8 TRUE/);
+  assert.equal(snapshot(), before, 'Invalid imports must not change saved state');
+  const payload = JSON.stringify({ action: 'adminImportResults', password: 'x'.repeat(200), results });
+  assert.ok(payload.length < 80000, `${count} results must fit existing payload limit`);
+  // Jalur POST dan batas payload juga dites untuk jumlah maksimal.
+  ctx.countRequest = { parameter: { requestId: 'count-test', origin: request.parameter.origin,
+    payload: JSON.stringify({ action: 'adminImportResults', password: 'testing-password-very-long', results: [...results].reverse() }) } };
+  const response = run('doPost(countRequest)').html;
+  assert.ok(response.includes('"ok":true'), response);
+  assert.equal(run('getSetting_("STATUS")'), 'LOCKED');
+  assert.equal(admin('adminStats').selected, 8);
+  before = snapshot();
+  assert.throws(() => admin('adminImportResults', { results }), /satu kali/);
+  assert.equal(snapshot(), before);
+  admin('adminGoLive');
+  ctx.countVerify = { checkToken: generated.tickets[0].checkToken, token: generated.tickets[0].token };
+  assert.equal(run('verifyTicket_(countVerify)').eligible, true);
+  assert.equal(run('verifyTicket_(countVerify)').alreadyChecked, true);
+  assert.equal(run('publicInfo_().checked'), 1);
+  admin('adminClose');
+  assert.throws(() => run('verifyTicket_(countVerify)'), /ditutup/);
+  run('setSetting_("TICKET_COUNT", "100abc")');
+  before = snapshot();
+  assert.throws(() => run('publicInfo_()'), /bilangan bulat 8–999/);
+  assert.equal(snapshot(), before, 'Invalid stored count must fail, not silently fall back');
+}
+// Batas POST tetap ditolak sebelum aksi dijalankan.
+ctx.oversizedRequest = { parameter: { ...request.parameter, payload: ' '.repeat(80001) } };
+assert.ok(run('doPost(oversizedRequest)').html.includes('Payload terlalu besar.'));
+console.log('PASS backend: default/legacy 65, konfigurasi 8/100/999, count dan QR terkunci, payload, validasi nonmutasi, EO 8 TRUE, scan ulang, auth, LIVE/CLOSED.');

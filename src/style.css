@@ -39,26 +39,6 @@
   --focus-ring: 0 0 0 3px rgba(23, 63, 53, 0.3);
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg-canvas: #101a14;
-  --bg-surface: #15241b;
-  --bg-surface-subtle: #1c3024;
-  --border: #294233;
-  --border-strong: #78c99e;
-  --border-control: #6f8777;
-  --forest-deep: #1e3629;
-  --forest-mid: #2e533f;
-  --forest-soft: #1d3326;
-  --forest-text: #96ddb7;
-  --bloom-rose: #f08b79;
-  --bloom-rose-soft: #381f1b;
-  --text-main: #edf5ef;
-  --text-muted: #adc0b2;
-  --text-inverse: #101a14;
-  --focus-ring: 0 0 0 3px rgba(150, 221, 183, 0.45);
-}
-
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -153,11 +133,6 @@ img, svg {
   border-bottom: 1px solid #e7d7c9;
 }
 
-:root[data-theme="dark"] .topbar {
-  background: #101a14;
-  border-color: #3c5142;
-}
-
 .topbar-brand {
   display: flex;
   align-items: center;
@@ -185,25 +160,6 @@ img, svg {
 .topbar-brand span {
   font-size: 14px;
   color: var(--text-muted);
-}
-
-/* Optional theme control. */
-.theme-toggle {
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  border: 1px solid var(--border-control);
-  background: transparent;
-  color: var(--text-main);
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.theme-toggle:hover {
-  background-color: var(--bg-surface-subtle);
 }
 
 /* Shared event canvas keeps participant, login, and admin in the same garden. */
@@ -548,57 +504,6 @@ img, svg {
   background: #e6ddd5;
 }
 
-:root[data-theme="dark"] .participant-main,
-:root[data-theme="dark"] .admin-main {
-  --text-main: #edf5ef;
-  --text-muted: #adc0b2;
-  --bloom-rose: #f1979e;
-  --bg-surface-subtle: #1c3024;
-  background-color: #14241c;
-  background-image:
-    radial-gradient(ellipse at 12% 16%, #372724 0%, transparent 36%),
-    radial-gradient(ellipse at 89% 24%, #2b3c2a 0%, transparent 34%),
-    radial-gradient(ellipse at 91% 95%, #3b2925 0%, transparent 34%);
-}
-
-:root[data-theme="dark"] .event-heading h1 {
-  color: #e2eddd;
-}
-
-:root[data-theme="dark"] .card-ticket {
-  border-color: #3c5142;
-  box-shadow: 0 22px 46px rgba(0, 0, 0, 0.24);
-}
-
-:root[data-theme="dark"] .card-ticket .btn-primary {
-  color: #ffffff;
-}
-
-:root[data-theme="dark"] .card-ticket .notice-error {
-  background: #382723;
-  border-color: #89564c;
-  color: #ffb5ab;
-}
-
-:root[data-theme="dark"] .notice-icon {
-  color: #bd6260;
-}
-
-:root[data-theme="dark"] .card-ticket .token-input {
-  background: #1b2c21;
-  border-color: #849c8b;
-  caret-color: #96ddb7;
-}
-
-:root[data-theme="dark"] .card-ticket .token-input::placeholder,
-:root[data-theme="dark"] .token-field svg {
-  color: #afc2b3;
-}
-
-:root[data-theme="dark"] .ticket-ornament span {
-  background: #52634f;
-}
-
 /* Repeat the refresh breeze; alternate direction avoids a jump between cycles. */
 @keyframes bloomSway {
   0% { transform: scale(0.97); }
@@ -822,11 +727,6 @@ img, svg {
   color: #ffffff;
 }
 
-:root[data-theme="dark"] .btn-primary {
-  background-color: #78c99e;
-  color: #101a14;
-}
-
 .btn-primary:hover:not(:disabled) {
   opacity: 0.92;
 }
@@ -891,18 +791,10 @@ img, svg {
   color: var(--forest-text);
 }
 
-:root[data-theme="dark"] .notice-info {
-  border-color: #274836;
-}
-
 .notice-error {
   background-color: var(--bloom-rose-soft);
   border: 1px solid #f2cac3;
   color: var(--bloom-rose);
-}
-
-:root[data-theme="dark"] .notice-error {
-  border-color: #5c2720;
 }
 
 .notice-success {
@@ -977,10 +869,6 @@ img, svg {
   color: #ffffff;
 }
 
-:root[data-theme="dark"] .admin-main .btn-primary {
-  color: #ffffff;
-}
-
 .admin-main .btn-primary:hover:not(:disabled) {
   background: #345943;
   opacity: 1;
@@ -992,10 +880,6 @@ img, svg {
 
 .admin-main .notice-error {
   color: #9f3e4b;
-}
-
-:root[data-theme="dark"] .admin-main .notice-error {
-  color: #ffb5ab;
 }
 
 .admin-login .btn {
@@ -1013,15 +897,6 @@ img, svg {
 
 .admin-login .ticket-ornament {
   margin-top: 24px;
-}
-
-:root[data-theme="dark"] .admin-main {
-  --border: #3c5142;
-  --border-control: #849c8b;
-}
-
-:root[data-theme="dark"] .admin-main .input-field {
-  background: #1b2c21;
 }
 
 .admin-top-bar {
@@ -1482,13 +1357,6 @@ tbody tr:last-child td, tbody tr:last-child th {
   background: rgba(253, 249, 243, 0.78);
   border-color: #e7d7c9;
   color: #586a60;
-}
-
-:root[data-theme="dark"] .participant-main + .site-footer,
-:root[data-theme="dark"] .admin-main + .site-footer {
-  background: rgba(16, 26, 20, 0.9);
-  border-color: #3c5142;
-  color: #adc0b2;
 }
 
 /* ==========================================================================

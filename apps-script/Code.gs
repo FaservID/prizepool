@@ -1,11 +1,11 @@
 /**
- * NBSA Prize Pool 2027 — backend Google Sheets.
- * H-1: cetak 65 QR; hari H: bagikan; EO tentukan TRUE/FALSE lewat CSV;
- * saat Prize Pool: scan QR dan masukkan 2027 + nomor 3 digit.
+ * NBSA Hidden Prize 2027 — backend Google Sheets.
+ * H-1: atur jumlah dan cetak QR; hari H: bagikan; EO tentukan TRUE/FALSE lewat CSV;
+ * saat Hidden Prize: scan QR dan masukkan 2027 + nomor 3 digit.
  * Data EO tidak pernah dimuat di frontend publik. Satu spreadsheet per acara.
  */
 const PP = Object.freeze({
-  COUNT: 65,
+  DEFAULT_COUNT: 65,
   WINNERS: 8,
   YEAR: '2027',
   TICKETS: 'Participants', // sengaja memakai nama tab lama supaya migrasi lebih aman
@@ -15,7 +15,7 @@ const PP = Object.freeze({
 });
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('🎁 Prize Pool')
+  SpreadsheetApp.getUi().createMenu('🎁 Hidden Prize')
     .addItem('1. Inisialisasi Database', 'setupProject')
     .addItem('2. Atur Password Admin', 'promptAdminPassword')
     .addItem('3. Atur Domain Website', 'promptSiteOrigins')
@@ -32,7 +32,7 @@ function setupProject() {
   if (tickets.getLastRow() > 1) {
     const head = tickets.getRange(1, 1, 1, PP.HEADERS.length).getValues()[0];
     if (head.join('|') !== PP.HEADERS.join('|')) {
-      throw new Error('Sheet sudah berisi data dari versi lama. Buat Spreadsheet baru agar 65 QR lama tidak tertimpa.');
+      throw new Error('Sheet sudah berisi data dari versi lama. Buat Spreadsheet baru agar QR lama tidak tertimpa.');
     }
   }
   // Jika spreadsheet sudah pernah di-setup tapi belum ada peserta, header lama aman diganti.
@@ -40,14 +40,14 @@ function setupProject() {
   if (settings.getLastRow() === 0) {
     settings.getRange(1, 1, 4, 2).setValues([
       ['key', 'value'], ['STATUS', 'DRAFT'],
-      ['EVENT_TITLE', 'NBSA Prize Pool 2027'], ['LOCKED_AT', ''],
+      ['EVENT_TITLE', 'NBSA Hidden Prize 2027'], ['LOCKED_AT', ''],
     ]);
   }
   if (audit.getLastRow() === 0) audit.appendRow(['waktu', 'aksi', 'nomor_registrasi', 'keterangan']);
   tickets.setFrozenRows(1); settings.setFrozenRows(1); audit.setFrozenRows(1);
   tickets.getRange('A:C').setNumberFormat('@');
   PropertiesService.getScriptProperties().setProperty('SHEET_ID', ss.getId());
-  ss.toast('Database Prize Pool 2027 siap. Atur password dan domain dari menu 🎁 Prize Pool.');
+  ss.toast('Database Hidden Prize 2027 siap. Atur password dan domain dari menu 🎁 Hidden Prize.');
 }
 
 function promptAdminPassword() {
@@ -76,14 +76,14 @@ function promptSiteOrigins() {
 
 function promptEventTitle() {
   const ui = SpreadsheetApp.getUi();
-  const res = ui.prompt('Nama acara', 'Contoh: NBSA Prize Pool 2027', ui.ButtonSet.OK_CANCEL);
+  const res = ui.prompt('Nama acara', 'Contoh: NBSA Hidden Prize 2027', ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
   const title = res.getResponseText().trim();
   if (title) setSetting_('EVENT_TITLE', title.slice(0, 100));
 }
 
 function doGet() {
-  return HtmlService.createHtmlOutput('<p>NBSA Prize Pool 2027 API aktif. Gunakan aplikasi React.</p>');
+  return HtmlService.createHtmlOutput('<p>NBSA Hidden Prize 2027 API aktif. Gunakan aplikasi React.</p>');
 }
 
 function doPost(e) {
@@ -120,20 +120,32 @@ function dispatch_(p) {
   if (action === 'verify') return verifyTicket_(p);
   assertAdmin_(p.password);
   if (action === 'adminStats') return adminStats_();
-  if (action === 'adminGenerateTickets') return withLock_(() => generateTickets_());
+  if (action === 'adminGenerateTickets') return withLock_(() => generateTickets_(p.ticketCount));
   if (action === 'adminImportResults') return withLock_(() => importResults_(p.results));
   if (action === 'adminGoLive') return withLock_(() => changeStatus_('LOCKED', 'LIVE'));
   if (action === 'adminClose') return withLock_(() => changeStatus_('LIVE', 'CLOSED'));
   throw new Error('Aksi tidak dikenal.');
 }
 
+function validateTicketCount_(value) {
+  const count = typeof value === 'number' ? value
+    : typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+  if (!Number.isInteger(count) || count < PP.WINNERS || count > 999) throw new Error('Jumlah tiket harus bilangan bulat 8–999.');
+  return count;
+}
+
+function getTicketCount_() {
+  const value = getSetting_('TICKET_COUNT');
+  return value === '' ? PP.DEFAULT_COUNT : validateTicketCount_(value);
+}
+
 function publicInfo_() {
   const rows = getTicketRows_();
   return {
-    title: getSetting_('EVENT_TITLE') || 'NBSA Prize Pool 2027',
+    title: getSetting_('EVENT_TITLE') || 'NBSA Hidden Prize 2027',
     status: getSetting_('STATUS') || 'DRAFT',
     total: rows.length,
-    maxParticipants: PP.COUNT,
+    maxParticipants: getTicketCount_(),
     maxWinners: PP.WINNERS,
     checked: rows.filter(r => !!r[4]).length,
   };
@@ -146,7 +158,7 @@ function verifyTicket_(p) {
     throw new Error('Token pengecekan atau QR Code tidak valid.');
   }
   return withLock_(() => {
-    if (getSetting_('STATUS') !== 'LIVE') throw new Error('Sesi pengecekan Prize Pool belum dibuka atau sudah ditutup.');
+    if (getSetting_('STATUS') !== 'LIVE') throw new Error('Sesi pengecekan Hidden Prize belum dibuka atau sudah ditutup.');
     const rows = getTicketRows_();
     const idx = rows.findIndex(r => String(r[1]) === checkToken && String(r[2]) === qrToken);
     if (idx < 0) {
@@ -182,29 +194,32 @@ function adminStats_() {
   };
 }
 
-function generateTickets_() {
+function generateTickets_(requestedCount) {
   if (getSetting_('STATUS') !== 'DRAFT') throw new Error('Tiket hanya bisa dibuat saat DRAFT.');
-  if (getTicketRows_().length) throw new Error('65 tiket sudah dibuat. Tidak dapat membuat ulang karena QR sudah dibagikan.');
+  if (getTicketRows_().length) throw new Error('Tiket sudah dibuat. Tidak dapat membuat ulang karena QR sudah dibagikan.');
+  const count = requestedCount === undefined ? getTicketCount_() : validateTicketCount_(requestedCount);
   const rows = [];
   const seen = new Set();
-  for (let i = 1; i <= PP.COUNT; i++) {
+  for (let i = 1; i <= count; i++) {
     const num = ('000' + i).slice(-3);
     let token;
     do { token = randomToken_(); } while (seen.has(token));
     seen.add(token);
     rows.push([num, PP.YEAR + num, token, false, '']);
   }
-  getSs_().getSheetByName(PP.TICKETS).getRange(2, 1, PP.COUNT, PP.HEADERS.length).setValues(rows);
+  setSetting_('TICKET_COUNT', String(count));
+  getSs_().getSheetByName(PP.TICKETS).getRange(2, 1, count, PP.HEADERS.length).setValues(rows);
   setSetting_('STATUS', 'TICKETS_READY');
-  appendAudit_('GENERATE_TICKETS', '', '65 tiket QR unik dibuat tanpa penentuan hasil');
+  appendAudit_('GENERATE_TICKETS', '', count + ' tiket QR unik dibuat tanpa penentuan hasil');
   return adminStats_();
 }
 
 function importResults_(items) {
   if (getSetting_('STATUS') !== 'TICKETS_READY') throw new Error('Hasil hanya dapat diimpor satu kali setelah QR dibuat dan sebelum sesi LIVE.');
+  const count = getTicketCount_();
   const rows = getTicketRows_();
-  if (rows.length !== PP.COUNT) throw new Error('Database wajib berisi tepat 65 tiket.');
-  if (!Array.isArray(items) || items.length !== PP.COUNT) throw new Error('File EO harus memiliki tepat 65 baris data.');
+  if (rows.length !== count) throw new Error('Database wajib berisi tepat ' + count + ' tiket.');
+  if (!Array.isArray(items) || items.length !== count) throw new Error('File EO harus memiliki tepat ' + count + ' baris data.');
   if (rows.some(row => !/^[a-f0-9]{64}$/.test(String(row[2])) || !!row[4])) {
     throw new Error('Data tiket tidak valid atau sudah ada hasil scan.');
   }
@@ -222,24 +237,25 @@ function importResults_(items) {
     if (typeof item.selected !== 'boolean') throw new Error('Kolom terpilih untuk nomor ' + number + ' wajib TRUE/FALSE.');
     selectedByNumber.set(number, item.selected);
   }
-  if (selectedByNumber.size !== PP.COUNT) throw new Error('Nomor 001 hingga 065 wajib lengkap.');
+  if (selectedByNumber.size !== count) throw new Error('Nomor registrasi wajib lengkap.');
   const selectedCount = Array.from(selectedByNumber.values()).filter(Boolean).length;
-  if (selectedCount !== PP.WINNERS) throw new Error('EO wajib memilih tepat 8 TRUE dan 57 FALSE. Saat ini ' + selectedCount + ' TRUE.');
+  if (selectedCount !== PP.WINNERS) throw new Error('EO wajib memilih tepat 8 TRUE dan ' + (count - PP.WINNERS) + ' FALSE. Saat ini ' + selectedCount + ' TRUE.');
   // Seluruh validasi dilakukan sebelum perubahan state. Tidak ada undian otomatis.
   setSetting_('STATUS', 'IMPORTING');
   const flags = rows.map(row => [selectedByNumber.get(String(row[0]))]);
-  getSs_().getSheetByName(PP.TICKETS).getRange(2, 4, PP.COUNT, 1).setValues(flags);
+  getSs_().getSheetByName(PP.TICKETS).getRange(2, 4, count, 1).setValues(flags);
   setSetting_('LOCKED_AT', new Date().toISOString());
   setSetting_('STATUS', 'LOCKED');
-  appendAudit_('IMPORT_EO_LOCKED', '', '65 status diimpor dari EO: 8 TRUE, 57 FALSE');
+  appendAudit_('IMPORT_EO_LOCKED', '', count + ' status diimpor dari EO: 8 TRUE, ' + (count - PP.WINNERS) + ' FALSE');
   return adminStats_();
 }
 
 function changeStatus_(expected, next) {
   if (getSetting_('STATUS') !== expected) throw new Error('Status harus ' + expected + ' untuk melanjutkan.');
+  const count = getTicketCount_();
   const rows = getTicketRows_();
-  if (rows.length !== PP.COUNT || rows.filter(r => r[3] === true).length !== PP.WINNERS) {
-    throw new Error('Validasi 65 tiket dan 8 TRUE gagal.');
+  if (rows.length !== count || rows.filter(r => r[3] === true).length !== PP.WINNERS) {
+    throw new Error('Validasi ' + count + ' tiket dan 8 TRUE gagal.');
   }
   setSetting_('STATUS', next);
   appendAudit_('STATUS', '', expected + ' → ' + next);
@@ -250,7 +266,7 @@ function assertAdmin_(password) {
   const p = PropertiesService.getScriptProperties();
   const salt = p.getProperty('ADMIN_SALT');
   const expected = p.getProperty('ADMIN_HASH');
-  if (!salt || !expected) throw new Error('Password admin belum diatur melalui menu Prize Pool di Google Sheets.');
+  if (!salt || !expected) throw new Error('Password admin belum diatur melalui menu Hidden Prize di Google Sheets.');
   const pass = String(password || '');
   if (pass.length > 200) throw new Error('Password tidak valid.');
   const actual = hashText_(salt + '|' + pass);

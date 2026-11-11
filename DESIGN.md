@@ -14,7 +14,7 @@ Desain peserta merefleksikan komposisi botani bertema Garden Bloom dan identitas
 ## Copy & Voice
 
 - Bahasa Indonesia lugas, profesional, dan ramah untuk acara internal perusahaan.
-- Nomor registrasi 3 digit (`001` - `065`) dan token 7 digit (`2027001` - `2027065`).
+- Nomor registrasi 3 digit mulai `001` sampai jumlah tiket tersimpan (8–999); token 7 digit berupa `2027` + nomor registrasi. Default 65 tetap didukung untuk acara lama.
 - Tidak ada badge dekoratif kosong atau status palsu; status berasal dari Google Apps Script.
 
 ## Color Palette & Measured Contrast
@@ -29,16 +29,7 @@ Desain peserta merefleksikan komposisi botani bertema Garden Bloom dan identitas
 - Bloom Rose Title: `#c14453` (4.46:1 contrast pada canvas krem; judul ukuran besar >38px lolos syarat 3.0:1 large text)
 - Border Control: `#8c978e` (3.1:1 contrast pada kontrol)
 
-### Night Garden (Dark Mode)
-- Canvas: `#14241c` dengan glow floral gelap
-- Surface: `#15241b`
-- Surface Subtle: `#1c3024`
-- Text Main: `#edf5ef` (13.5:1 contrast)
-- Text Muted: `#adc0b2` (7.8:1 contrast)
-- Button Teks: `#ffffff` (lolos kontras tinggi di atas gradien tombol gelap)
-- Forest Accent: `#96ddb7`
-- Bloom Rose Accent: `#f1979e`
-- Border Control: `#849c8b`
+Light mode menjadi satu-satunya tema untuk peserta, login, dan admin. Tema OS dan preferensi dark lama diabaikan; kontrol penggantian tema ditiadakan.
 
 ## Typography
 
@@ -52,7 +43,7 @@ Desain peserta merefleksikan komposisi botani bertema Garden Bloom dan identitas
 - Peserta: Kartu tiket terpusat 548px dengan radius 30px, input token 62px dengan ikon kunci, tombol periksa 60px dengan ikon cari, serta ornamen bunga di bawah kartu.
 - Header: Pada halaman login dan dashboard admin (?admin=1), header tetap ditampilkan dengan logo PT NBSA dan teks brand bertumpuk. Pada halaman peserta publik, header ditiadakan agar kanvas langsung menyajikan logo hero dan tajuk Bloom & Beyond.
 - Login & Admin: Mengikuti bahasa visual index (Bloom & Beyond) dengan kanvas krem peach hangat, tipografi Cormorant Garamond 600, dan palet forest green/rose. Halaman login memakai kartu tiket 548px dengan aksen bunga pink dan ornamen bunga merah. Halaman dashboard memakai panel beradius senada dengan cabang sudut botani statis agar panitia tetap fokus pada operasi sesi dan tiket.
-- Footer: Ramping dan terpusat dengan identitas acara ("NBSA Prize Pool 2027 · Bloom & Beyond").
+- Footer: Ramping dan terpusat dengan identitas acara ("NBSA Hidden Prize 2027 · Bloom & Beyond").
 - Bunga dekoratif: Pada halaman peserta, cabang botani dan aksen bunga kartu terus berayun 6 detik per arah; kelopak melayang 7 detik per arah. Gerakan bergantian tanpa lompatan antar-siklus, dengan fase berbeda seperti gerakan saat refresh. Animasi otomatis dijeda saat elemen keluar layar (IntersectionObserver) atau tab tersembunyi (visibilitychange). Form dan logo tetap diam. Pada halaman admin, bingkai bunga ditampilkan statis.
 - Reduced motion: Semua animasi dekoratif dinonaktifkan untuk pengguna dengan preferensi `prefers-reduced-motion: reduce`.
 - Responsif: Gutter 16px pada viewport ponsel (<=600px), panel dengan padding lebih ringkas, dan pratinjau QR persegi yang mengikuti ruang tersedia (`width: min(100%, 220px)`). Halaman peserta pernah diperiksa tanpa overflow horizontal pada 1920px, 768px, 375px, dan 320px. Perubahan login/admin terbaru belum diperiksa di browser; status ini bukan hasil verifikasi visual.

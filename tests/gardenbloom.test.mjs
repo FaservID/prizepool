@@ -236,12 +236,29 @@ test('JPEG rejects null, empty, unsupported output, invalid quality and thrown s
   assert.equal(await canvasToJpegBlob(canvas(jpeg)), jpeg);
 });
 
-test('Bulk export requires 65 valid distinct ticket pairs before rendering', async () => {
-  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl), /65 tiket/);
+test('Bulk export requires valid distinct ticket pairs before rendering', async () => {
+  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl, {}, {}, null, 65), /tepat 65 tiket/);
+  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl), /Nomor registrasi di luar rentang atau duplikat/);
   await assert.rejects(bulkGenerateTicketsZip(tickets, null), /Fungsi URL/);
   await assert.rejects(bulkGenerateTicketsZip(Array(65).fill(tickets[0]), participantUrl), /duplikat/);
   await assert.rejects(bulkGenerateTicketsZip(tickets.map((v, i) => i ? v : { ...v, token: '' }), participantUrl), /QR rahasia/);
   await assert.rejects(bulkGenerateTicketsZip(tickets, () => ''), /URL peserta/);
+});
+
+test('Bulk export works with configurable ticket counts', async t => {
+  browserMock(t);
+  const smallTickets = Array.from({ length: 8 }, (_, i) => {
+    const registrationNumber = String(i + 1).padStart(3, '0');
+    return { registrationNumber, checkToken: `2027${registrationNumber}`, token: (i + 1).toString(16).padStart(64, '0') };
+  });
+  const progress = [];
+  const zip = await bulkGenerateTicketsZip(smallTickets, participantUrl, {}, {}, (...args) => progress.push(args), 8);
+  const files = await unzipStored(zip);
+  assert.equal(files.length, 8);
+  assert.equal(files[0].name, 'Tiket_GardenBloom_001.jpg');
+  assert.equal(files[7].name, 'Tiket_GardenBloom_008.jpg');
+  assert.deepEqual(progress[0], [1, 8, '001']);
+  assert.deepEqual(progress[7], [8, 8, '008']);
 });
 
 test('Bulk creates exactly 65 individual JPG entries and reports completed progress', async t => {

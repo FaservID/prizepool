@@ -5,10 +5,10 @@ import QRCode from 'qrcode';
 
 export const STATUS_NAMES = {
   DRAFT: 'Belum ada tiket',
-  TICKETS_READY: '65 QR siap cetak, menunggu hasil EO',
+  TICKETS_READY: 'QR siap cetak, menunggu hasil EO',
   IMPORTING: 'Impor sedang diverifikasi admin',
   LOCKED: 'Hasil EO terkunci permanen',
-  LIVE: 'Prize Pool LIVE, hasil dapat dicek',
+  LIVE: 'Hidden Prize LIVE, hasil dapat dicek',
   CLOSED: 'Sesi undian selesai',
 };
 
@@ -20,12 +20,31 @@ export function formatDatetime(value) {
     : date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function normalizeRegistrationNumber(value) {
+export function validateTicketCount(value) {
+  const count = typeof value === 'number' ? value
+    : typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
+  if (!Number.isInteger(count) || count < 8 || count > 999) throw new Error('Jumlah tiket harus bilangan bulat 8–999.');
+  return count;
+}
+
+export function normalizeRegistrationNumber(value, maxParticipants = 999) {
   const raw = String(value ?? '').trim();
   if (!/^\d{1,3}$/.test(raw)) throw new Error(`Nomor registrasi tidak valid: ${raw}`);
   const n = Number(raw);
-  if (n < 1 || n > 65) throw new Error(`Nomor registrasi harus 001–065: ${raw}`);
+  if (n < 1 || n > maxParticipants) throw new Error(`Nomor registrasi harus 001–${String(maxParticipants).padStart(3, '0')}: ${raw}`);
   return String(n).padStart(3, '0');
+}
+
+export function validateTicketSet(tickets, expectedCount = tickets?.length) {
+  const count = validateTicketCount(expectedCount);
+  if (!Array.isArray(tickets) || tickets.length !== count) throw new Error(`Daftar tiket harus berisi tepat ${count} tiket.`);
+  const numbers = new Set();
+  for (const ticket of tickets) {
+    validatePrintableTicket(ticket);
+    if (Number(ticket.registrationNumber) > count || numbers.has(ticket.registrationNumber)) throw new Error('Nomor registrasi di luar rentang atau duplikat.');
+    numbers.add(ticket.registrationNumber);
+  }
+  return count;
 }
 
 function parseDelimited(text) {
@@ -53,7 +72,8 @@ function parseDelimited(text) {
   return rows;
 }
 
-export function parseEoCsv(text) {
+export function parseEoCsv(text, expectedCount = 65) {
+  const count = validateTicketCount(expectedCount);
   const rows = parseDelimited(text);
   if (rows.length < 2) throw new Error('CSV kosong atau tidak memiliki data EO.');
   const header = rows[0].map(v => v.toLowerCase().trim());
@@ -62,23 +82,23 @@ export function parseEoCsv(text) {
   const s = header.indexOf('terpilih');
   if (n < 0 || t < 0 || s < 0) throw new Error('Header wajib: nomor_registrasi,token_pengecekan,terpilih');
   const result = rows.slice(1).map((r, i) => {
-    const registrationNumber = normalizeRegistrationNumber(r[n]);
+    const registrationNumber = normalizeRegistrationNumber(r[n], count);
     const checkToken = String(r[t] || '').trim();
     if (checkToken !== `2027${registrationNumber}`) throw new Error(`Baris ${i + 2}: token harus 2027${registrationNumber}`);
     const raw = String(r[s] || '').trim().toUpperCase();
     if (raw !== 'TRUE' && raw !== 'FALSE') throw new Error(`Baris ${i + 2}: terpilih wajib TRUE atau FALSE.`);
     return { registrationNumber, checkToken, selected: raw === 'TRUE' };
   });
-  if (result.length !== 65) throw new Error(`CSV harus berisi tepat 65 data. Terbaca: ${result.length}.`);
+  if (result.length !== count) throw new Error(`CSV harus berisi tepat ${count} data. Terbaca: ${result.length}.`);
   const numbers = new Set(result.map(r => r.registrationNumber));
-  if (numbers.size !== 65) throw new Error('Ada nomor registrasi duplikat.');
+  if (numbers.size !== count) throw new Error('Ada nomor registrasi duplikat.');
   const trueCount = result.filter(r => r.selected).length;
   if (trueCount !== 8) throw new Error(`EO harus mengisi tepat 8 TRUE. Saat ini ada ${trueCount}.`);
   return result;
 }
 
-export function buildEoCsv(tickets) {
-  if (!Array.isArray(tickets) || tickets.length !== 65) throw new Error('Buat 65 tiket terlebih dahulu.');
+export function buildEoCsv(tickets, expectedCount = tickets?.length) {
+  validateTicketSet(tickets, expectedCount);
   const rows = [...tickets].sort((a,b)=>a.registrationNumber.localeCompare(b.registrationNumber));
   return '﻿nomor_registrasi,token_pengecekan,terpilih\r\n' +
     rows.map(r => `${r.registrationNumber},${r.checkToken},FALSE`).join('\r\n') + '\r\n';
@@ -324,7 +344,7 @@ export async function renderTicketCardToCanvas(ticket, qrCanvas, options = {}) {
   if (document.fonts) await document.fonts.ready;
   const {
     companyName = '',
-    eventTitle = 'NBSA PRIZE POOL 2027',
+    eventTitle = 'NBSA Hidden Prize 2027',
     eventSubtitle = 'GARDEN BLOOM CELEBRATION',
   } = options;
 
@@ -494,7 +514,7 @@ export async function renderTicketCardToCanvas(ticket, qrCanvas, options = {}) {
   ctx.font = '500 13px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.letterSpacing = '0px';
   fitText('1. Pindai QR menggunakan kamera ponsel atau pembaca QR.', width / 2, 898);
-  fitText(`2. Masukkan token ${ticket.checkToken} saat sesi Prize Pool dibuka panitia.`, width / 2, 922);
+  fitText(`2. Masukkan token ${ticket.checkToken} saat sesi Hidden Prize dibuka panitia.`, width / 2, 922);
 
   ctx.fillStyle = '#7a8c7e';
   ctx.font = '400 11.5px "Plus Jakarta Sans", system-ui, sans-serif';
@@ -518,28 +538,30 @@ export function canvasToJpegBlob(canvas, quality = 0.92) {
 }
 
 /**
- * Generate semua 65 tiket menjadi file JPG individual dan kemas dalam ZIP
+ * Generate semua tiket menjadi file JPG individual dan kemas dalam ZIP
  */
-export async function bulkGenerateTicketsZip(tickets, getParticipantUrl, qrOptions = {}, brandingOptions = {}, onProgress = null) {
-  if (!Array.isArray(tickets) || tickets.length !== 65) {
-    throw new Error('Daftar tiket harus berisi tepat 65 tiket.');
-  }
+export async function bulkGenerateTicketsZip(
+  tickets,
+  getParticipantUrl,
+  qrOptions = {},
+  brandingOptions = {},
+  onProgress = null,
+  expectedCount = tickets?.length
+) {
+  const count = validateTicketSet(tickets, expectedCount);
   if (typeof getParticipantUrl !== 'function') {
     throw new Error('Fungsi URL peserta wajib disediakan.');
   }
 
-  const numbers = new Set();
   const tokens = new Set();
   for (const ticket of tickets) {
-    validatePrintableTicket(ticket);
-    if (!/^[a-f0-9]{64}$/i.test(ticket.token || '') || numbers.has(ticket.registrationNumber) || tokens.has(ticket.token.toLowerCase())) {
+    if (!/^[a-f0-9]{64}$/i.test(ticket.token || '') || tokens.has(ticket.token.toLowerCase())) {
       throw new Error('Nomor atau QR rahasia tiket tidak valid atau duplikat.');
     }
-    numbers.add(ticket.registrationNumber);
     tokens.add(ticket.token.toLowerCase());
   }
   const files = [];
-  const total = tickets.length;
+  const total = count;
 
   for (let i = 0; i < total; i++) {
     const ticket = tickets[i];

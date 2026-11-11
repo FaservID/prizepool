@@ -1,4 +1,4 @@
-name: Deploy React Prize Pool ke GitHub Pages
+name: Deploy React Hidden Prize ke GitHub Pages
 on:
   push:
     branches: [main]
