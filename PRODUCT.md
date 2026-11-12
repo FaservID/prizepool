@@ -27,7 +27,7 @@ Tiket disiapkan sebelum acara, dibagikan saat registrasi, dan diperiksa melalui 
 - Pertahankan backend Google Apps Script dan alur DRAFT, TICKETS_READY, IMPORTING, LOCKED, LIVE, CLOSED.
 - Remake mencakup halaman peserta dan admin yang responsif.
 - QR cetak harus menerima logo perusahaan dari unggahan pengguna, ditempatkan di tengah.
-- Sediakan pengaturan tampilan QR, pratinjau, cetak A4, dan bulk JPG. ZIP menjadi wadah sekali unduh untuk berkas JPG individual.
+- Sediakan pengaturan tampilan QR, pratinjau, cetak A4, dan bulk ZIP. ZIP mengemas berkas gambar QR Code individual (hanya QR murni, tanpa desain kartu atau teks tambahan).
 - Gunakan logo resmi yang tersedia di repositori (`public/pt-nbsa-logo.png`). Jangan mengarang logo atau mengganti data acara dengan data contoh yang tampak nyata.
 
 ## Brand Commitments

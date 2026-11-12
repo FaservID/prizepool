@@ -325,12 +325,11 @@ function AdminPage({ refreshPublicInfo }) {
         data?.tickets,
         participantUrl,
         qrOptions,
-        brandingOptions,
         current => setBulkProgress(current),
         ticketCount
       );
-      downloadBlob(blob, `Tiket_GardenBloom_${ticketCount}_JPG.zip`);
-      setSuccess(`ZIP siap: ${ticketCount} berkas JPG individual, masing-masing 1440 × 2080 piksel.`);
+      downloadBlob(blob, `QR_${ticketCount}_JPG.zip`);
+      setSuccess(`ZIP siap: ${ticketCount} gambar QR saja, masing-masing ${qrOptions.size} × ${qrOptions.size} piksel dalam format JPG.`);
     } catch (err) { setError(`Ekspor dibatalkan. ${err.message}`); }
     finally { setExporting(''); }
   }
@@ -411,7 +410,7 @@ function AdminPage({ refreshPublicInfo }) {
             <div><dt>Sudah diperiksa</dt><dd>{data?.checked ?? 0}<span> / {ticketCount}</span></dd></div>
           </dl>
           <section className="panel" aria-labelledby="studio-title">
-            <div className="section-heading"><h2 id="studio-title">Studio tiket</h2><p>Tambahkan logo perusahaan, lalu unduh JPG atau cetak lembar A4.</p></div>
+            <div className="section-heading"><h2 id="studio-title">Studio tiket</h2><p>ZIP berisi QR saja dalam format JPG. Kartu tiket tersedia lewat JPG satuan atau cetak A4.</p></div>
             <div className="qr-studio-grid">
               <fieldset className="studio-controls" disabled={busy || !!exporting || logoLoading}>
                 <legend className="sr-only">Pengaturan logo dan ekspor</legend>
@@ -433,10 +432,10 @@ function AdminPage({ refreshPublicInfo }) {
                   <label><input type="radio" name="logo-shape" value="square" checked={badgeShape === 'square'} onChange={() => setBadgeShape('square')} /> Kotak membulat</label>
                 </fieldset>
                 <div className="button-row export-actions">
-                  <button type="button" className="btn btn-primary" disabled={!ticketsReady || exportDisabled} onClick={handleBulkDownloadZip}>{exporting === 'zip' ? 'Membuat ZIP…' : `Unduh ${ticketCount} JPG (.zip)`}</button>
+                  <button type="button" className="btn btn-primary" disabled={!ticketsReady || exportDisabled} onClick={handleBulkDownloadZip}>{exporting === 'zip' ? 'Membuat ZIP…' : `Unduh ${ticketCount} QR (.zip)`}</button>
                   <button type="button" className="btn btn-outline" disabled={!ticketsReady || exportDisabled} onClick={openPrintPreview}>{exporting === 'print' ? 'Menyiapkan cetak…' : 'Pratinjau cetak A4'}</button>
                 </div>
-                {exporting === 'zip' && <div className="export-progress"><label htmlFor="bulk-progress">Membuat JPG: {bulkProgress} / {ticketCount}</label><progress id="bulk-progress" max={ticketCount} value={bulkProgress} /></div>}
+                {exporting === 'zip' && <div className="export-progress"><label htmlFor="bulk-progress">Membuat QR: {bulkProgress} / {ticketCount}</label><progress id="bulk-progress" max={ticketCount} value={bulkProgress} /></div>}
               </fieldset>
               <figure className="studio-preview">
                 <div className="qr-preview-image" aria-busy={previewLoading}>

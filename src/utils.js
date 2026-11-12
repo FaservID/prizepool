@@ -258,8 +258,8 @@ function colorLuminance(color) {
 }
 
 /**
- * H corrects damaged codewords, not arbitrary central area. Scan-test final print.
- * Keep four-module quiet zone and repaint function patterns above uploaded logo.
+ * H corrects damaged codewords, not a fixed logo area. Scan-test final print.
+ * Keep four-module quiet zone and function patterns clear of the centered logo.
  */
 export async function generateQrCanvas(text, options = {}) {
   const {
@@ -276,7 +276,23 @@ export async function generateQrCanvas(text, options = {}) {
   const dark = colorLuminance(darkColor);
   const light = colorLuminance(lightColor);
   if ((light + 0.05) / (dark + 0.05) < 4.5) throw new Error('QR memerlukan warna gelap di atas latar terang dengan kontras minimal 4,5:1.');
-  const qr = QRCode.create(text, { errorCorrectionLevel: 'H' });
+  const logoRatio = Math.max(10, Math.min(18, logoSizePercent)) / 100;
+  const badgeRatio = Math.min(0.22, logoRatio * 1.2);
+  let qr = QRCode.create(text, { errorCorrectionLevel: 'H' });
+  // Choose a version whose entire centered badge clears mandatory QR patterns.
+  while (logoSrc) {
+    const start = Math.floor(qr.modules.size * (1 - badgeRatio) / 2);
+    const end = qr.modules.size - start;
+    let overlaps = false;
+    for (let row = start; row < end && !overlaps; row++) {
+      for (let col = start; col < end; col++) {
+        if (qr.modules.isReserved(row, col)) { overlaps = true; break; }
+      }
+    }
+    if (!overlaps) break;
+    if (qr.version === 40) throw new Error('Logo menutupi pola wajib QR. Perkecil logo atau pendekkan URL.');
+    qr = QRCode.create(text, { errorCorrectionLevel: 'H', version: qr.version + 1 });
+  }
   const modules = qr.modules;
   const scale = Math.floor(size / (modules.size + 8));
   if (scale < 2) throw new Error('QR terlalu padat. Perbesar ukuran QR atau pendekkan URL.');
@@ -298,8 +314,8 @@ export async function generateQrCanvas(text, options = {}) {
     const logoImg = await loadImage(logoSrc);
     const center = offset + modules.size * scale / 2;
     const symbolSize = modules.size * scale;
-    const logoSize = symbolSize * Math.max(10, Math.min(18, logoSizePercent)) / 100;
-    const badgeSize = Math.min(symbolSize * 0.22, logoSize * 1.2);
+    const logoSize = symbolSize * logoRatio;
+    const badgeSize = symbolSize * badgeRatio;
     ctx.fillStyle = lightColor;
     ctx.beginPath();
     if (badgeShape === 'square') {
@@ -321,12 +337,6 @@ export async function generateQrCanvas(text, options = {}) {
     const dh = logoImg.naturalHeight * fit;
     ctx.drawImage(logoImg, center - dw / 2, center - dh / 2, dw, dh);
     ctx.restore();
-    // qrcode 1.5.4 marks finder, timing, alignment, format and version modules.
-    for (let row = 0; row < modules.size; row++) {
-      for (let col = 0; col < modules.size; col++) {
-        if (modules.isReserved(row, col)) paintModule(row, col);
-      }
-    }
   }
   return canvas;
 }
@@ -537,14 +547,11 @@ export function canvasToJpegBlob(canvas, quality = 0.92) {
   });
 }
 
-/**
- * Generate semua tiket menjadi file JPG individual dan kemas dalam ZIP
- */
+/** Ekspor QR saja sebagai JPG individual dalam ZIP, tanpa desain kartu. */
 export async function bulkGenerateTicketsZip(
   tickets,
   getParticipantUrl,
   qrOptions = {},
-  brandingOptions = {},
   onProgress = null,
   expectedCount = tickets?.length
 ) {
@@ -572,8 +579,7 @@ export async function bulkGenerateTicketsZip(
 
     try {
       const qrCanvas = await generateQrCanvas(url, qrOptions);
-      const cardCanvas = await renderTicketCardToCanvas(ticket, qrCanvas, brandingOptions);
-      const blob = await canvasToJpegBlob(cardCanvas, 0.92);
+      const blob = await canvasToJpegBlob(qrCanvas, 0.95);
       const arrayBuffer = await blob.arrayBuffer();
 
       files.push({

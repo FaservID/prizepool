@@ -146,37 +146,50 @@ test('QR keeps integer modules and at least four-module quiet zone', async t => 
   }
 });
 
-test('Uploaded logo is centered, aspect-fit, capped including badge; reserved QR modules repainted', async t => {
+test('Centered logo stays unobstructed without covering mandatory QR patterns', async t => {
   const { images } = browserMock(t);
-  // Version 7+ has alignment patterns crossing center; test those as well as short URLs.
+  // Original versions 7+ can place alignment patterns in the logo area.
   for (const text of ['short', participantUrl(tickets[0].token), 'https://example.test/' + 'x'.repeat(220)]) {
-    const size = 512;
-    const qr = QRCode.create(text, { errorCorrectionLevel: 'H' });
-    const canvas = await generateQrCanvas(text, { size, logoSrc: 'data:image/png;base64,local', logoSizePercent: 30, badgeShape: 'square' });
-    const calls = canvas.ctx.calls;
-    const imageIndex = calls.findIndex(c => c.name === 'drawImage');
-    const [image, x, y, width, height] = calls[imageIndex].args;
-    assert.equal(image.naturalWidth / image.naturalHeight, width / height);
-    const scale = Math.floor(size / (qr.modules.size + 8));
-    const offset = Math.floor((size - qr.modules.size * scale) / 2);
-    const center = offset + qr.modules.size * scale / 2;
-    assert.equal(x + width / 2, center);
-    assert.equal(y + height / 2, center);
-    assert.ok(width <= qr.modules.size * scale * 0.18 + 1e-9);
-    const badge = calls.find(c => c.name === 'roundRect');
-    assert.ok(badge.args[2] <= qr.modules.size * scale * 0.22);
-    const repainted = calls.slice(imageIndex + 1).filter(c => c.name === 'fillRect');
-    let reservedCount = 0;
-    for (let row = 0; row < qr.modules.size; row++) for (let col = 0; col < qr.modules.size; col++) {
-      if (!qr.modules.isReserved(row, col)) continue;
-      const painted = repainted[reservedCount++];
-      assert.deepEqual(painted.args, [offset + col * scale, offset + row * scale, scale, scale]);
-      assert.equal(painted.color, qr.modules.get(row, col) ? '#173f35' : '#ffffff');
+    for (const badgeShape of ['circle', 'square']) for (const logoSizePercent of [10, 16, 30]) {
+      const size = 512;
+      const canvas = await generateQrCanvas(text, { size, logoSrc: 'data:image/png;base64,local', logoSizePercent, badgeShape });
+      const calls = canvas.ctx.calls;
+      const painted = calls.filter(c => c.name === 'fillRect').slice(1);
+      const moduleCount = Math.sqrt(painted.length);
+      const qr = QRCode.create(text, { errorCorrectionLevel: 'H', version: (moduleCount - 17) / 4 });
+      assert.equal(qr.modules.size, moduleCount);
+      const scale = Math.floor(size / (moduleCount + 8));
+      const offset = Math.floor((size - moduleCount * scale) / 2);
+      const center = offset + moduleCount * scale / 2;
+      const symbolSize = moduleCount * scale;
+      const imageIndex = calls.findIndex(c => c.name === 'drawImage');
+      const [image, x, y, width, height] = calls[imageIndex].args;
+      assert.equal(image.naturalWidth / image.naturalHeight, width / height);
+      assert.equal(x + width / 2, center);
+      assert.equal(y + height / 2, center);
+      assert.ok(width <= symbolSize * 0.18 + 1e-9);
+      const badge = calls.find(c => c.name === (badgeShape === 'square' ? 'roundRect' : 'arc'));
+      const badgeSize = badgeShape === 'square' ? badge.args[2] : badge.args[2] * 2;
+      assert.ok(badgeSize <= symbolSize * 0.22);
+      for (let row = 0; row < moduleCount; row++) for (let col = 0; col < moduleCount; col++) {
+        const module = painted[row * moduleCount + col];
+        const left = offset + col * scale;
+        const top = offset + row * scale;
+        assert.deepEqual(module.args, [left, top, scale, scale]);
+        assert.equal(module.color, qr.modules.get(row, col) ? '#173f35' : '#ffffff');
+        assert.ok(left >= 4 * scale && top >= 4 * scale);
+        assert.ok(left + scale <= size - 4 * scale && top + scale <= size - 4 * scale);
+        if (qr.modules.isReserved(row, col)) {
+          assert.ok(left + scale <= center - badgeSize / 2 || left >= center + badgeSize / 2
+            || top + scale <= center - badgeSize / 2 || top >= center + badgeSize / 2,
+          'Badge must not obscure any mandatory QR module');
+        }
+      }
+      assert.deepEqual(calls.slice(imageIndex + 1).map(c => c.name), ['restore']);
+      assert.ok(!calls.some(c => c.name === 'stroke'), 'No border beyond badge coverage');
     }
-    assert.equal(repainted.length, reservedCount);
-    assert.ok(!calls.some(c => c.name === 'stroke'), 'No shadow or border beyond badge coverage');
   }
-  assert.equal(images.length, 3);
+  assert.equal(images.length, 18);
 });
 
 test('QR rejects invalid dimensions, transparent/inverted/low-contrast colors and remote logos', async t => {
@@ -237,7 +250,7 @@ test('JPEG rejects null, empty, unsupported output, invalid quality and thrown s
 });
 
 test('Bulk export requires valid distinct ticket pairs before rendering', async () => {
-  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl, {}, {}, null, 65), /tepat 65 tiket/);
+  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl, {}, null, 65), /tepat 65 tiket/);
   await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl), /Nomor registrasi di luar rentang atau duplikat/);
   await assert.rejects(bulkGenerateTicketsZip(tickets, null), /Fungsi URL/);
   await assert.rejects(bulkGenerateTicketsZip(Array(65).fill(tickets[0]), participantUrl), /duplikat/);
@@ -245,26 +258,33 @@ test('Bulk export requires valid distinct ticket pairs before rendering', async 
   await assert.rejects(bulkGenerateTicketsZip(tickets, () => ''), /URL peserta/);
 });
 
-test('Bulk export works with configurable ticket counts', async t => {
-  browserMock(t);
+test('Bulk exports only square QR images for configurable ticket counts', async t => {
+  const { canvases } = browserMock(t);
   const smallTickets = Array.from({ length: 8 }, (_, i) => {
     const registrationNumber = String(i + 1).padStart(3, '0');
     return { registrationNumber, checkToken: `2027${registrationNumber}`, token: (i + 1).toString(16).padStart(64, '0') };
   });
   const progress = [];
-  const zip = await bulkGenerateTicketsZip(smallTickets, participantUrl, {}, {}, (...args) => progress.push(args), 8);
+  const zip = await bulkGenerateTicketsZip(smallTickets, participantUrl, { size: 1024 }, (...args) => progress.push(args), 8);
   const files = await unzipStored(zip);
   assert.equal(files.length, 8);
   assert.equal(files[0].name, 'Tiket_GardenBloom_001.jpg');
   assert.equal(files[7].name, 'Tiket_GardenBloom_008.jpg');
   assert.deepEqual(progress[0], [1, 8, '001']);
   assert.deepEqual(progress[7], [8, 8, '008']);
+  assert.equal(canvases.length, 8, 'One QR canvas per ticket, without card canvas');
+  for (const canvas of canvases) {
+    assert.equal(canvas.width, 1024);
+    assert.equal(canvas.height, 1024);
+    assert.deepEqual(canvas.encoding, { type: 'image/jpeg', quality: 0.95 });
+    assert.ok(canvas.ctx.calls.every(call => call.name === 'fillRect'), 'Only QR modules and quiet zone, without text or decoration');
+  }
 });
 
 test('Bulk creates exactly 65 individual JPG entries and reports completed progress', async t => {
   browserMock(t);
   const progress = [];
-  const zip = await bulkGenerateTicketsZip(tickets, participantUrl, {}, {}, (...args) => progress.push(args));
+  const zip = await bulkGenerateTicketsZip(tickets, participantUrl, {}, (...args) => progress.push(args));
   const files = await unzipStored(zip);
   assert.equal(files.length, 65);
   assert.equal(new Set(files.map(f => f.name)).size, 65);
@@ -277,7 +297,7 @@ test('Bulk creates exactly 65 individual JPG entries and reports completed progr
 test('Bulk JPEG failure rejects whole export with ticket number, without false progress', async t => {
   browserMock(t, { jpeg: null });
   const progress = [];
-  await assert.rejects(bulkGenerateTicketsZip(tickets, participantUrl, {}, {}, (...args) => progress.push(args)), /tiket 001: Browser gagal membuat/);
+  await assert.rejects(bulkGenerateTicketsZip(tickets, participantUrl, {}, (...args) => progress.push(args)), /tiket 001: Browser gagal membuat/);
   assert.deepEqual(progress, []);
 });
 
