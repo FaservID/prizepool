@@ -4,12 +4,12 @@
 import QRCode from 'qrcode';
 
 export const STATUS_NAMES = {
-  DRAFT: 'Belum ada tiket',
-  TICKETS_READY: 'QR siap cetak, menunggu hasil EO',
-  IMPORTING: 'Impor sedang diverifikasi admin',
-  LOCKED: 'Hasil EO terkunci permanen',
-  LIVE: 'Hidden Prize LIVE, hasil dapat dicek',
-  CLOSED: 'Sesi undian selesai',
+  DRAFT: 'Persiapan tiket',
+  TICKETS_READY: 'Tiket siap, menunggu impor hasil',
+  IMPORTING: 'Impor hasil sedang diproses',
+  LOCKED: 'Status keikutsertaan dikunci',
+  LIVE: 'Sesi pengecekan dibuka',
+  CLOSED: 'Sesi pengecekan ditutup',
 };
 
 export function formatDatetime(value) {
@@ -75,7 +75,7 @@ function parseDelimited(text) {
 export function parseEoCsv(text, expectedCount = 65) {
   const count = validateTicketCount(expectedCount);
   const rows = parseDelimited(text);
-  if (rows.length < 2) throw new Error('CSV kosong atau tidak memiliki data EO.');
+  if (rows.length < 2) throw new Error('Berkas CSV kosong atau tidak memiliki baris data.');
   const header = rows[0].map(v => v.toLowerCase().trim());
   const n = header.indexOf('nomor_registrasi');
   const t = header.indexOf('token_pengecekan');
@@ -93,7 +93,7 @@ export function parseEoCsv(text, expectedCount = 65) {
   const numbers = new Set(result.map(r => r.registrationNumber));
   if (numbers.size !== count) throw new Error('Ada nomor registrasi duplikat.');
   const trueCount = result.filter(r => r.selected).length;
-  if (trueCount !== 8) throw new Error(`EO harus mengisi tepat 8 TRUE. Saat ini ada ${trueCount}.`);
+  if (trueCount !== 8) throw new Error(`Kolom terpilih harus berisi tepat 8 TRUE. Saat ini terbaca ${trueCount}.`);
   return result;
 }
 
@@ -528,7 +528,7 @@ export async function renderTicketCardToCanvas(ticket, qrCanvas, options = {}) {
 
   ctx.fillStyle = '#7a8c7e';
   ctx.font = '400 11.5px "Plus Jakarta Sans", system-ui, sans-serif';
-  fitText('Satu tiket berlaku untuk satu karyawan. Keputusan hasil undian ditetapkan oleh EO.', width / 2, 954);
+  fitText('Satu tiket berlaku untuk satu karyawan. Tunjukkan tiket fisik asli kepada panitia.', width / 2, 954);
 
   return canvas;
 }

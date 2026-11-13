@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  buildEoCsv, parseEoCsv, normalizeRegistrationNumber, validateTicketCount, validateTicketSet,
+  STATUS_NAMES, buildEoCsv, parseEoCsv, normalizeRegistrationNumber, validateTicketCount, validateTicketSet,
 } from '../src/utils.js';
 
 for (const value of [8, 65, 100, 999, '8', '100', ' 999 ']) {
@@ -62,4 +62,6 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 assert.match(html, /<html[^>]*data-theme="light"/);
 assert.match(css, /color-scheme:\s*light\s*;/);
 assert.doesNotMatch(app + css, /nb_theme|ThemeToggle|prefers-color-scheme|data-theme\s*=\s*["']dark/);
-console.log('PASS frontend: konfigurasi 8/65/100/999, CSV lengkap dengan 8 TRUE, validasi pasangan dan jumlah, default 65, source light-only.');
+assert.doesNotMatch(app + Object.values(STATUS_NAMES).join('\n'), /(?:hasil(?: pilihan)?|terpilih|CSV) EO\b|Yahh|berhak menerima Hidden Prize/i);
+assert.match(app, /berhak mengikuti Hidden Prize NBSA/);
+console.log('PASS frontend: konfigurasi 8/65/100/999, CSV lengkap dengan 8 TRUE, validasi pasangan dan jumlah, default 65, source light-only, bahasa status keikutsertaan.');

@@ -8,10 +8,10 @@
 |---|---|---|
 | **H-1** | Admin mengisi **Jumlah tiket** pada **Pengaturan sesi**, klik **Buat tiket**, lalu unduh JPG/ZIP atau buka **Pratinjau cetak A4**. | Membuat nomor berurutan mulai `001` dan token `2027` + nomor sebanyak konfigurasi; **belum ada yang TRUE**. Semua QR berisi tautan halaman peserta yang sama, tanpa parameter token. |
 | **Hari H: registrasi awal** | Bagikan **1 tiket ke 1 karyawan** secara acak. Nama tidak dicatat. | QR universal membuka halaman peserta, tidak memuat nomor tiket, nama, atau pemenang. |
-| **Hari H: sebelum Hidden Prize** | EO mengunduh **CSV EO** sesuai jumlah tiket, mengubah tepat 8 kolom `terpilih` menjadi `TRUE`, sisanya `FALSE`. | Hasil belum otomatis terlihat oleh karyawan. Template Excel standar tersedia hanya untuk 65 tiket. |
-| **Sebelum pengumuman** | EO mengirimkan CSV akhir kepada admin, lalu admin memilih **CSV hasil EO**. | Backend memvalidasi seluruh nomor sesuai konfigurasi, pasangan token, dan tepat 8 TRUE, lalu mengunci hasil (LOCKED). |
-| **Sesi Hidden Prize** | MC meminta karyawan scan QR dan mengetik `2027` + nomor tiket 3 digit (contoh reg. `052` menjadi `2027052`). Admin klik **Aktifkan Hidden Prize**. | Sistem memverifikasi token pengecekan saat sesi LIVE; lalu tampilkan status terpilih TRUE / FALSE. |
-| **Selesai** | Admin klik **Tutup Sesi**. | Pengecekan ditutup, riwayat scan tersimpan. |
+| **Hari H: sebelum Hidden Prize** | EO memilih **Unduh format CSV** sesuai jumlah tiket, lalu mengisi kolom `terpilih` dengan tepat 8 nilai `TRUE`, sisanya `FALSE`. | Hasil belum otomatis terlihat oleh karyawan. Template Excel standar tersedia hanya untuk 65 tiket. |
+| **Sebelum pengumuman** | EO mengirimkan CSV akhir kepada admin, lalu admin mengunggahnya pada **Unggah berkas CSV**. | Backend memvalidasi seluruh nomor sesuai konfigurasi, pasangan token, dan tepat 8 TRUE, lalu mengunci hasil (LOCKED). |
+| **Sesi Hidden Prize** | MC meminta karyawan memindai QR dan memasukkan `2027` + nomor tiket 3 digit (contoh registrasi `052` menjadi `2027052`). Admin memilih **Buka sesi pengecekan**. | Sistem memeriksa token pengecekan saat sesi LIVE, lalu menampilkan status terpilih TRUE / FALSE. |
+| **Selesai** | Admin memilih **Tutup sesi pengecekan**. | Pengecekan ditutup, riwayat scan tersimpan. |
 
 **Tidak ada pengacakan pemenang di aplikasi.** EO yang menentukan tepat 8 `TRUE` melalui file. Tidak ada nama karyawan pada spreadsheet, tiket, atau formulir. Cetak ulang harus memakai QR yang **sama** (jangan generate ulang).
 

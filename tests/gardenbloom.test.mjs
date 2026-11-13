@@ -250,6 +250,9 @@ test('Ticket card doubles pixel resolution, disables QR smoothing, fits custom t
   assert.equal(customName.args[3], 624);
   const instructions = card.ctx.calls.find(c => c.name === 'fillText' && c.args[0].startsWith('1. Pindai'));
   assert.equal(instructions.spacing, '0px');
+  const text = card.ctx.calls.filter(c => c.name === 'fillText').map(c => c.args[0]).join('\n');
+  assert.doesNotMatch(text, /\bEO\b/);
+  assert.match(text, /Tunjukkan tiket fisik asli kepada panitia\./);
   const defaultCard = await renderTicketCardToCanvas(tickets[0], qr);
   assert.ok(!defaultCard.ctx.calls.some(c => c.name === 'fillText' && /NUSANTARA/.test(c.args[0])));
   await assert.rejects(renderTicketCardToCanvas({ ...tickets[0], checkToken: '2027002' }, qr), /token pengecekan/);

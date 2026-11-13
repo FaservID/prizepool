@@ -91,8 +91,8 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
           <GardenFlower pink className="card-flower-accent" />
           {!result ? (
             <>
-              <h2 id="ticket-title">Cek Tiket Hidden Prize</h2>
-              <p className="card-instruction">Pindai QR pada tiket, lalu masukkan token untuk melihat hasil pilihan EO.</p>
+              <h2 id="ticket-title">Periksa tiket Hidden Prize</h2>
+              <p className="card-instruction">Masukkan token pada tiket untuk melihat status keikutsertaan Anda dalam Hidden Prize.</p>
               {!isConfigured ? (
                 <Notice type="error">
                   <svg className="notice-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="currentColor" /><path d="M12 6v7m0 3v2" stroke="white" strokeWidth="2" /></svg>
@@ -102,8 +102,8 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
                 <div className="session-status">
                   <p role="status">
                     {infoLoading ? 'Memuat status sesi…' : infoError ? 'Status sesi belum tersedia.' : info?.status === 'LIVE'
-                      ? 'Sesi dibuka. Tiket Anda bisa diperiksa.' : info?.status === 'CLOSED'
-                        ? 'Sesi pengecekan sudah ditutup.' : `Sesi belum dibuka. ${STATUS_NAMES[info?.status] || 'Menunggu panitia'}.`}
+                      ? 'Sesi pengecekan dibuka. Silakan periksa tiket Anda.' : info?.status === 'CLOSED'
+                        ? 'Sesi pengecekan telah ditutup.' : 'Sesi belum dibuka. Silakan menunggu pengumuman panitia.'}
                   </p>
                   <button type="button" className="text-button" disabled={infoLoading} onClick={reloadInfo}>Perbarui status sesi</button>
                 </div>
@@ -129,8 +129,8 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
             </>
           ) : (
             <div className="result-card">
-              <h2 id="ticket-title" ref={resultRef} tabIndex={-1}>{result.eligible ? 'Tiket Anda terpilih' : 'Tiket Anda belum terpilih'}</h2>
-              <p className="card-instruction">{result.eligible ? 'Anda berhak mengikuti Hidden Prize NBSA. Tunjukkan tiket fisik saat panitia memanggil nomor Anda.' : 'Yahh, Mohon Maaf Nomor anda tidak terpilih untuk mengikuti Hidden Prize NBSA. Sampai jumpa di acara berikutnya!'}</p>
+              <h2 id="ticket-title" ref={resultRef} tabIndex={-1}>{result.eligible ? 'Tiket Anda terpilih' : 'Tiket Anda tidak terpilih'}</h2>
+              <p className="card-instruction">{result.eligible ? 'Selamat, Anda berhak mengikuti Hidden Prize NBSA. Tunjukkan tiket fisik asli saat panitia memanggil nomor Anda.' : 'Mohon maaf, tiket Anda tidak terpilih untuk mengikuti Hidden Prize NBSA. Terima kasih atas partisipasi Anda.'}</p>
               <dl className="ticket-identity">
                 <div><dt>Nomor registrasi</dt><dd>{result.registrationNumber}</dd></div>
                 <div><dt>Token pengecekan</dt><dd>{result.checkToken}</dd></div>
@@ -257,14 +257,14 @@ function AdminPage({ refreshPublicInfo }) {
     try { count = validateTicketCount(ticketCountInput); }
     catch (err) { setError(err.message); return; }
     await execute('adminGenerateTickets',
-      `Buat ${count} tiket sekarang? Jumlah dan QR tidak dapat diubah setelah dibuat.`,
+      `Buat ${count} tiket sekarang? Jumlah dan data tiket tidak dapat diubah setelah dibuat.`,
       `${count} tiket disiapkan. Jumlah tiket terkunci.`, { ticketCount: count });
   }
 
   function downloadTemplate() {
     try {
-      downloadText('template_EO_prizepool_2027.csv', buildEoCsv(data?.tickets, ticketCount));
-      setSuccess(`CSV EO disiapkan (${data?.tickets?.length || ticketCount} tiket). Isi tepat 8 TRUE, sisanya FALSE.`);
+      downloadText('template_hasil_prizepool_2027.csv', buildEoCsv(data?.tickets, ticketCount));
+      setSuccess(`Format CSV disiapkan untuk ${data?.tickets?.length || ticketCount} tiket. Isi kolom terpilih dengan tepat 8 TRUE, sisanya FALSE.`);
       setError('');
     } catch (err) { setError(err.message); }
   }
@@ -278,9 +278,9 @@ function AdminPage({ refreshPublicInfo }) {
     try {
       if (file.size > 2 * 1024 * 1024) throw new Error(`CSV terlalu besar. Batas 2 MB untuk ${ticketCount} baris tiket.`);
       const rows = parseEoCsv(await file.text(), ticketCount);
-      if (!window.confirm(`CSV valid: tepat 8 TRUE dari ${ticketCount} tiket. Impor dan kunci hasil permanen? Tindakan ini tidak dapat diulang.`)) return;
+      if (!window.confirm(`Berkas CSV valid: tepat 8 tiket terpilih (TRUE) dari ${ticketCount} tiket. Impor dan kunci status keikutsertaan secara permanen? Tindakan ini tidak dapat diulang.`)) return;
       await send('adminImportResults', { results: rows });
-      setSuccess('Hasil EO dikunci. Sesi pengecekan belum dibuka.');
+      setSuccess('Status keikutsertaan berhasil dikunci. Sesi pengecekan belum dibuka.');
     } catch (err) { setError(err.message || 'CSV gagal diimpor. Periksa isi berkas.'); }
   }
 
@@ -402,7 +402,7 @@ function AdminPage({ refreshPublicInfo }) {
           <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
           <dl className="stats-grid" aria-label="Jumlah tiket">
             <div><dt>Tiket tersedia</dt><dd>{data?.total ?? 0}<span> / {ticketCount}</span></dd></div>
-            <div><dt>Terpilih EO</dt><dd>{data?.selected ?? 0}<span> / 8</span></dd></div>
+            <div><dt>Tiket terpilih</dt><dd>{data?.selected ?? 0}<span> / 8</span></dd></div>
             <div><dt>Sudah diperiksa</dt><dd>{data?.checked ?? 0}<span> / {ticketCount}</span></dd></div>
           </dl>
           <section className="panel" aria-labelledby="studio-title">
@@ -443,7 +443,7 @@ function AdminPage({ refreshPublicInfo }) {
             </div>
           </section>
           <section className="panel" aria-labelledby="flow-title">
-            <div className="section-heading"><h2 id="flow-title">Pengaturan sesi</h2><p>Hasil EO diimpor sekali. Pembukaan dan penutupan sesi tetap dikendalikan panitia.</p></div>
+            <div className="section-heading"><h2 id="flow-title">Pengaturan sesi</h2><p>Status keikutsertaan diimpor satu kali dan tidak dapat diubah. Panitia mengatur pembukaan dan penutupan sesi.</p></div>
             {data?.status !== 'DRAFT' && <p className="field-help">Jumlah terkunci: {ticketCount} tiket. Nomor 001–{lastNumber}, token 2027001–2027{lastNumber}.</p>}
             <div className="session-actions">
               {data?.status === 'DRAFT' && <div>
@@ -452,29 +452,29 @@ function AdminPage({ refreshPublicInfo }) {
                   <div className="form-group">
                     <label htmlFor="ticket-count">Jumlah tiket</label>
                     <input id="ticket-count" className="input-field" type="number" min="8" max="999" step="1" required value={ticketCountInput} onChange={e => setTicketCountInput(e.target.value)} disabled={sessionDisabled} aria-describedby="ticket-count-help" />
-                    <p id="ticket-count-help" className="field-help">8–999 tiket dengan nomor 3 digit. EO tetap memilih tepat 8 TRUE. Jumlah dan QR tidak dapat diubah setelah dibuat.</p>
+                    <p id="ticket-count-help" className="field-help">8–999 tiket dengan nomor 3 digit. Berkas hasil wajib memuat tepat 8 tiket terpilih (TRUE). Jumlah dan data tiket tidak dapat diubah setelah dibuat.</p>
                   </div>
                   <button type="submit" className="btn btn-primary" disabled={sessionDisabled}>{busy ? 'Menyiapkan…' : 'Buat tiket'}</button>
                 </form>
               </div>}
-              {ticketsReady && <div><h3>Format hasil EO</h3><p>EO mengisi tepat 8 TRUE dari {ticketCount} baris, sisanya FALSE. Buka CSV di Excel bila perlu, lalu simpan hasil akhir sebagai CSV.</p><div className="button-row"><button type="button" className="btn btn-outline" disabled={sessionDisabled} onClick={downloadTemplate}>Unduh CSV EO</button>{ticketCount === 65 && <a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh Excel (65 tiket)</a>}</div></div>}
-              {data?.status === 'TICKETS_READY' && <div><h3>Impor dan kunci hasil</h3><p>Periksa kembali berkas EO. Hasil yang sudah diimpor tidak dapat diganti.</p><label htmlFor="eo-csv">CSV hasil EO</label><input id="eo-csv" className="file-input" type="file" accept=".csv,text/csv" disabled={busy || !!exporting} onChange={importEo} /></div>}
+              {ticketsReady && <div><h3>Format hasil</h3><p>Isi kolom terpilih dengan tepat 8 TRUE dari {ticketCount} baris, sisanya FALSE. Simpan berkas akhir dalam format CSV.</p><div className="button-row"><button type="button" className="btn btn-outline" disabled={sessionDisabled} onClick={downloadTemplate}>Unduh format CSV</button>{ticketCount === 65 && <a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh format Excel (65 tiket)</a>}</div></div>}
+              {data?.status === 'TICKETS_READY' && <div><h3>Impor dan kunci data</h3><p>Periksa kembali data sebelum diimpor. Status yang telah dikunci tidak dapat diubah kembali.</p><label htmlFor="eo-csv">Unggah berkas CSV</label><input id="eo-csv" className="file-input" type="file" accept=".csv,text/csv" disabled={busy || !!exporting} onChange={importEo} /></div>}
               {data?.status === 'IMPORTING' && <div><h3>Impor sedang diproses</h3><p>Tunggu hingga selesai, lalu segarkan data. Jangan mengimpor ulang.</p></div>}
-              {data?.status === 'LOCKED' && <div><h3>Buka pengecekan peserta</h3><p>8 tiket terpilih sudah dikunci. Buka sesi setelah MC memberi aba-aba.</p><button type="button" className="btn btn-primary" disabled={busy || !!exporting} onClick={() => execute('adminGoLive', 'Buka pengecekan hasil untuk seluruh peserta sekarang?', 'Sesi dibuka. Peserta dapat memeriksa tiket.')}>Buka sesi pengecekan</button></div>}
+              {data?.status === 'LOCKED' && <div><h3>Buka pengecekan peserta</h3><p>8 tiket terpilih sudah dikunci. Buka sesi setelah pengumuman dimulai.</p><button type="button" className="btn btn-primary" disabled={busy || !!exporting} onClick={() => execute('adminGoLive', 'Buka pengecekan hasil untuk seluruh peserta sekarang?', 'Sesi dibuka. Peserta dapat memeriksa tiket.')}>Buka sesi pengecekan</button></div>}
               {data?.status === 'LIVE' && <div><h3>Tutup sesi</h3><p>Peserta tidak dapat memeriksa tiket setelah sesi ditutup. Sesi tidak bisa dibuka kembali.</p><button type="button" className="btn btn-danger" disabled={busy || !!exporting} onClick={() => execute('adminClose', 'Tutup sesi pengecekan? Sesi tidak dapat dibuka kembali.', 'Sesi pengecekan ditutup.')}>Tutup sesi pengecekan</button></div>}
-              {data?.status === 'CLOSED' && <div><h3>Sesi selesai</h3><p>Pengecekan peserta ditutup. Data tiket dan hasil EO tetap tersimpan.</p></div>}
+              {data?.status === 'CLOSED' && <div><h3>Sesi selesai</h3><p>Sesi pengecekan telah ditutup. Data tiket dan status keikutsertaan tetap tersimpan.</p></div>}
             </div>
           </section>
           <section className="panel" aria-labelledby="tickets-title">
-            <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket memakai nomor, tanpa nama karyawan.</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil EO' : 'Tampilkan hasil EO'}</button></div>
+            <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket menggunakan nomor registrasi, tanpa mencatat nama karyawan.</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil' : 'Tampilkan hasil'}</button></div>
             <div className="table-toolbar"><div className="search-field"><label htmlFor="ticket-search">Cari nomor atau token</label><input id="ticket-search" className="input-field" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="052 atau 2027052" /></div><p className="field-help" role="status">{filtered.length} dari {data?.tickets?.length || 0} tiket</p></div>
             <div className="table-scroll" role="region" aria-label="Daftar tiket peserta, geser untuk melihat seluruh kolom" tabIndex={0}>
-              <table><caption className="sr-only">Nomor registrasi, token pengecekan, status pengecekan, dan hasil EO</caption><thead><tr><th scope="col">Nomor</th><th scope="col">Token</th><th scope="col">Pengecekan</th><th scope="col">Hasil EO</th><th scope="col">Unduh</th></tr></thead><tbody>
+              <table><caption className="sr-only">Nomor registrasi, token pengecekan, status pengecekan, dan status terpilih</caption><thead><tr><th scope="col">Nomor</th><th scope="col">Token</th><th scope="col">Pengecekan</th><th scope="col">Status terpilih</th><th scope="col">Unduh</th></tr></thead><tbody>
                 {filtered.map(ticket => <tr key={ticket.registrationNumber}><th scope="row">{ticket.registrationNumber}</th><td className="tabular">{ticket.checkToken}</td><td>{ticket.checkedAt ? 'Sudah diperiksa' : 'Belum diperiksa'}</td><td>{showResults && ['LOCKED', 'LIVE', 'CLOSED'].includes(data.status) ? ticket.eligible ? 'Terpilih (TRUE)' : 'Tidak terpilih (FALSE)' : 'Disembunyikan'}</td><td><button type="button" className="btn btn-outline row-download" disabled={exportDisabled} onClick={() => downloadSingleCardJpg(ticket)} aria-label={`Unduh JPG tiket ${ticket.registrationNumber}`}>{exporting === ticket.registrationNumber ? 'Membuat…' : 'JPG'}</button></td></tr>)}
                 {!filtered.length && <tr><td colSpan={5}>Tidak ada tiket yang cocok.</td></tr>}
               </tbody></table>
             </div>
-            {data?.lockedAt && <p className="field-help lock-time">Hasil EO dikunci: {formatDatetime(data.lockedAt)}</p>}
+            {data?.lockedAt && <p className="field-help lock-time">Data hasil dikunci: {formatDatetime(data.lockedAt)}</p>}
           </section>
           <dialog ref={printRef} className="print-dialog" aria-labelledby="print-title" onCancel={() => setModalCards([])} onClose={() => setModalCards([])}>
             <div className="print-toolbar"><div><h2 id="print-title">Cetak {modalCards.length} tiket</h2><p>A4 potret, 4 tiket per lembar. Skala 100%, tanpa header/footer browser.</p></div><div className="button-row"><button type="button" className="btn btn-primary" onClick={() => window.print()}>Cetak A4</button><button type="button" className="btn btn-outline" autoFocus onClick={() => setModalCards([])}>Tutup pratinjau</button></div></div>

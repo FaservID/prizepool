@@ -1,8 +1,8 @@
 /**
  * NBSA Hidden Prize 2027 — backend Google Sheets.
- * H-1: atur jumlah dan cetak QR; hari H: bagikan; EO tentukan TRUE/FALSE lewat CSV;
- * saat Hidden Prize: scan QR dan masukkan 2027 + nomor 3 digit.
- * Data EO tidak pernah dimuat di frontend publik. Satu spreadsheet per acara.
+ * H-1: atur jumlah dan cetak QR; hari H: bagikan tiket dan impor status keikutsertaan melalui CSV;
+ * saat Hidden Prize: peserta scan QR dan masukkan token 2027 + nomor 3 digit.
+ * Status keikutsertaan tidak pernah dimuat di frontend publik sebelum verifikasi. Satu spreadsheet per acara.
  */
 const PP = Object.freeze({
   DEFAULT_COUNT: 65,
@@ -260,7 +260,7 @@ function importResults_(items) {
   const count = getTicketCount_();
   const rows = getTicketRows_();
   if (rows.length !== count) throw new Error('Database wajib berisi tepat ' + count + ' tiket.');
-  if (!Array.isArray(items) || items.length !== count) throw new Error('File EO harus memiliki tepat ' + count + ' baris data.');
+  if (!Array.isArray(items) || items.length !== count) throw new Error('Berkas hasil harus memiliki tepat ' + count + ' baris data.');
   if (rows.some(row => !/^[a-f0-9]{64}$/.test(String(row[2])) || !!row[4])) {
     throw new Error('Data tiket tidak valid atau sudah ada hasil scan.');
   }
@@ -280,14 +280,14 @@ function importResults_(items) {
   }
   if (selectedByNumber.size !== count) throw new Error('Nomor registrasi wajib lengkap.');
   const selectedCount = Array.from(selectedByNumber.values()).filter(Boolean).length;
-  if (selectedCount !== PP.WINNERS) throw new Error('EO wajib memilih tepat 8 TRUE dan ' + (count - PP.WINNERS) + ' FALSE. Saat ini ' + selectedCount + ' TRUE.');
+  if (selectedCount !== PP.WINNERS) throw new Error('Kolom terpilih harus berisi tepat 8 TRUE dan ' + (count - PP.WINNERS) + ' FALSE. Saat ini terbaca ' + selectedCount + ' TRUE.');
   // Seluruh validasi dilakukan sebelum perubahan state. Tidak ada undian otomatis.
   setSetting_('STATUS', 'IMPORTING');
   const flags = rows.map(row => [selectedByNumber.get(String(row[0]))]);
   getSs_().getSheetByName(PP.TICKETS).getRange(2, 4, count, 1).setValues(flags);
   setSetting_('LOCKED_AT', new Date().toISOString());
   setSetting_('STATUS', 'LOCKED');
-  appendAudit_('IMPORT_EO_LOCKED', '', count + ' status diimpor dari EO: 8 TRUE, ' + (count - PP.WINNERS) + ' FALSE');
+  appendAudit_('IMPORT_EO_LOCKED', '', count + ' status keikutsertaan dikunci: 8 TRUE, ' + (count - PP.WINNERS) + ' FALSE');
   return adminStats_();
 }
 
