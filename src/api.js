@@ -3,19 +3,31 @@
  * Via hidden POST form + Apps Script HtmlService postMessage.
  * Ini menghindari pembatasan CORS Google Apps Script ContentService.
  */
-const API_URL = (import.meta.env.VITE_GAS_URL || '').trim();
+const API_URL = (import.meta.env?.VITE_GAS_URL || '').trim();
 
 // Periksa apakah URL Google Apps Script valid dan bukan placeholder
 export const isConfigured =
   /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(API_URL) &&
   !API_URL.includes('PASTE_DEPLOYMENT_ID');
 
-export function prizePoolRequest(action, fields = {}, password = '') {
-
-  if (!isConfigured) {
-    return Promise.reject(new Error('API Google Apps Script belum dikonfigurasi.'));
+export async function prizePoolRequest(action, fields = {}, password = '') {
+  if (!isConfigured) throw new Error('API Google Apps Script belum dikonfigurasi.');
+  const canRetry = action === 'verify' || action === 'publicInfo';
+  const attempts = canRetry ? 4 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (canRetry) {
+      const delay = attempt === 0 ? Math.random() * 1500 : 1000 * 2 ** (attempt - 1) * (1 + Math.random());
+      await new Promise(resolve => window.setTimeout(resolve, delay));
+    }
+    const response = await requestOnce(action, fields, password, canRetry ? 15000 : 30000);
+    if (response.ok) return response.data;
+    if (!canRetry || response.retryable !== true || attempt === attempts - 1) {
+      throw new Error(response.error || 'Server menolak permintaan.');
+    }
   }
+}
 
+function requestOnce(action, fields, password, timeout) {
   return new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const iframe = document.createElement('iframe');
@@ -30,7 +42,8 @@ export function prizePoolRequest(action, fields = {}, password = '') {
     form.target = iframe.name;
     form.acceptCharset = 'UTF-8';
     form.style.display = 'none';
-    const payload = { action, ...fields, ...(password ? { password } : {}) };
+    // Action tetap milik pemanggil; mutasi admin tidak boleh masuk jalur retry publik.
+    const payload = { ...fields, action, ...(password ? { password } : {}) };
     const formValues = {
       requestId,
       origin: window.location.origin,
@@ -57,18 +70,18 @@ export function prizePoolRequest(action, fields = {}, password = '') {
       if (!data || data.type !== 'NBSA_PRIZEPOOL_RESULT' || data.requestId !== requestId || completed) return;
       if (evt.origin !== 'null' && !/^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|google\.com)$/i.test(evt.origin)) return;
       cleanUp();
-      if (data.ok) resolve(data.data);
-      else reject(new Error(data.error || 'Server menolak permintaan.'));
+      resolve(data);
     }
     const timer = window.setTimeout(() => {
       if (completed) return;
       cleanUp();
-      reject(new Error('Koneksi habis waktu. Periksa deployment Apps Script, akses Anyone, dan pengaturan domain GitHub Pages.'));
-    }, 30000);
+      resolve({ ok: false, retryable: true,
+        error: 'Koneksi habis waktu. Periksa deployment Apps Script, akses Anyone, dan pengaturan domain GitHub Pages.' });
+    }, timeout);
 
     window.addEventListener('message', handleMessage);
-    document.body.append(iframe, form);
     try {
+      document.body.append(iframe, form);
       form.submit();
     } catch (err) {
       cleanUp();
@@ -77,8 +90,7 @@ export function prizePoolRequest(action, fields = {}, password = '') {
   });
 }
 
-export function participantUrl(token) {
-  const url = new URL(import.meta.env.BASE_URL || '/', window.location.origin);
-  url.searchParams.set('qr', token);
+export function participantUrl() {
+  const url = new URL(import.meta.env?.BASE_URL || '/', window.location.origin);
   return url.toString();
 }

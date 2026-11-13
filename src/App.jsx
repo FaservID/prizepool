@@ -18,7 +18,6 @@ import {
 // ponytail: Nomor 3 digit membatasi jumlah tiket sampai 999; perluas format token bila lebih.
 
 const params = new URLSearchParams(window.location.search);
-const qrFromUrl = params.get('qr') || '';
 const isAdmin = params.has('admin');
 
 function preference(key, fallback) {
@@ -41,7 +40,6 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
   const [flowersPaused, setFlowersPaused] = useState(false);
   const gardenRef = useRef(null);
   const resultRef = useRef(null);
-  const qrValid = /^[a-f0-9]{64}$/i.test(qrFromUrl);
 
   useEffect(() => { if (result) resultRef.current?.focus(); }, [result]);
   useEffect(() => {
@@ -64,13 +62,11 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!qrValid) return setError('Pindai QR pada tiket fisik Anda terlebih dahulu.');
     if (!/^2027\d{3}$/.test(checkToken)) return setError('Masukkan 7 digit token pada tiket, misalnya 2027052.');
     setLoading(true);
     setError('');
     try {
-      setResult(await prizePoolRequest('verify', { checkToken, token: qrFromUrl }));
-      reloadInfo();
+      setResult(await prizePoolRequest('verify', { checkToken }));
     } catch (err) {
       setError(err.message || 'Tiket gagal diperiksa. Coba lagi.');
     } finally { setLoading(false); }
@@ -113,7 +109,7 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
                 </div>
               )}
               <Notice type="error">{infoError}</Notice>
-              <p id="qr-context" className="qr-context">{qrValid ? 'QR diterima dari tautan. Kecocokan tiket diperiksa saat dikirim.' : 'Buka halaman ini melalui QR pada tiket fisik Anda.'}</p>
+              <p id="qr-context" className="qr-context">Masukkan 7 digit token pada tiket fisik Anda (contoh: 2027052).</p>
               <form onSubmit={submit} className="participant-form" aria-busy={loading}>
                 <div className="form-group">
                   <label htmlFor="check-token">Token pengecekan</label>
@@ -123,7 +119,7 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
                       aria-describedby="qr-context" value={checkToken} placeholder="Masukkan token pada tiket" onChange={e => setCheckToken(e.target.value.replace(/\D/g, '').slice(0, 7))} />
                   </div>
                 </div>
-                <button type="submit" className="btn btn-primary btn-full" disabled={loading || !isConfigured || !qrValid || info?.status !== 'LIVE'}>
+                <button type="submit" className="btn btn-primary btn-full" disabled={loading || !isConfigured || info?.status !== 'LIVE'}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="m15 15 6 6" /></svg>
                   {loading ? 'Memeriksa tiket…' : 'Periksa tiket saya'}
                 </button>
@@ -194,7 +190,7 @@ function AdminPage({ refreshPublicInfo }) {
     setPreviewLoading(true);
     setPreviewError('');
     setPreviewQrSrc('');
-    generateQrCanvas(participantUrl('0123456789abcdef'.repeat(4)), { size: 512, logoSrc: logoDataUrl, logoSizePercent, badgeShape })
+    generateQrCanvas(participantUrl(), { size: 512, logoSrc: logoDataUrl, logoSizePercent, badgeShape })
       .then(canvas => { if (!canceled) setPreviewQrSrc(canvas.toDataURL('image/png')); })
       .catch(err => { if (!canceled) setPreviewError(err.message || 'Pratinjau gagal dibuat. Hapus atau unggah ulang logo.'); })
       .finally(() => { if (!canceled) setPreviewLoading(false); });
@@ -339,7 +335,7 @@ function AdminPage({ refreshPublicInfo }) {
     setError('');
     setSuccess('');
     try {
-      const qr = await generateQrCanvas(participantUrl(ticket.token), qrOptions);
+      const qr = await generateQrCanvas(participantUrl(), qrOptions);
       const canvas = await renderTicketCardToCanvas(ticket, qr, brandingOptions);
       downloadBlob(await canvasToJpegBlob(canvas, 0.95), `Tiket_GardenBloom_${ticket.registrationNumber}.jpg`);
       setSuccess(`JPG tiket ${ticket.registrationNumber} siap diunduh.`);
@@ -359,7 +355,7 @@ function AdminPage({ refreshPublicInfo }) {
     try {
       const cards = [];
       for (const ticket of data.tickets) {
-        const canvas = await generateQrCanvas(participantUrl(ticket.token), qrOptions);
+        const canvas = await generateQrCanvas(participantUrl(), qrOptions);
         cards.push({ ...ticket, src: canvas.toDataURL('image/png') });
       }
       setModalCards(cards);

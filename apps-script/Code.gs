@@ -47,6 +47,8 @@ function setupProject() {
   tickets.setFrozenRows(1); settings.setFrozenRows(1); audit.setFrozenRows(1);
   tickets.getRange('A:C').setNumberFormat('@');
   PropertiesService.getScriptProperties().setProperty('SHEET_ID', ss.getId());
+  removeCache_('public:' + ss.getId());
+  removeCache_('tickets:' + ss.getId());
   ss.toast('Database Hidden Prize 2027 siap. Atur password dan domain dari menu 🎁 Hidden Prize.');
 }
 
@@ -104,6 +106,7 @@ function doPost(e) {
     envelope = { type: 'NBSA_PRIZEPOOL_RESULT', requestId: reqId, ok: true, data };
   } catch (err) {
     envelope = { type: 'NBSA_PRIZEPOOL_RESULT', requestId: reqId, ok: false,
+      retryable: err && err.code === 'BUSY',
       error: String(err && err.message || 'Terjadi kesalahan server.').slice(0, 250) };
   }
   const safeJson = JSON.stringify(envelope).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
@@ -139,9 +142,14 @@ function getTicketCount_() {
   return value === '' ? PP.DEFAULT_COUNT : validateTicketCount_(value);
 }
 
-function publicInfo_() {
-  const rows = getTicketRows_();
-  return {
+function publicInfo_(ticketRows) {
+  const cacheKey = 'public:' + PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!ticketRows) {
+    const cached = readCache_(cacheKey);
+    if (cached) return cached;
+  }
+  const rows = ticketRows || getTicketRows_();
+  const info = {
     title: getSetting_('EVENT_TITLE') || 'NBSA Hidden Prize 2027',
     status: getSetting_('STATUS') || 'DRAFT',
     total: rows.length,
@@ -149,26 +157,57 @@ function publicInfo_() {
     maxWinners: PP.WINNERS,
     checked: rows.filter(r => !!r[4]).length,
   };
+  writeCache_(cacheKey, info, 5);
+  return info;
 }
 
 function verifyTicket_(p) {
   const checkToken = String(p.checkToken || '').trim();
-  const qrToken = String(p.token || '').trim().toLowerCase();
-  if (!/^2027\d{3}$/.test(checkToken) || !/^[a-f0-9]{64}$/.test(qrToken)) {
+  const qrToken = String(p.token || '').trim();
+  // QR universal tidak memerlukan token QR; pasangan dari klien lama tetap divalidasi.
+  const hasQr = qrToken !== '';
+  const legacyQr = /^[a-f0-9]{64}$/i.test(qrToken);
+  if (!/^2027\d{3}$/.test(checkToken) || (hasQr && !(legacyQr || /^[A-Za-z0-9_-]{16}$/.test(qrToken)))) {
     throw new Error('Token pengecekan atau QR Code tidak valid.');
   }
-  return withLock_(() => {
+  // Status otoritatif tidak di-cache: CLOSED tetap menolak meski hasil tiket ada di cache.
+  if (getSetting_('STATUS') !== 'LIVE') throw new Error('Sesi pengecekan Hidden Prize belum dibuka atau sudah ditutup.');
+  const sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  const ticketsKey = 'tickets:' + sheetId;
+  let rows = readCache_(ticketsKey);
+  if (!rows) {
+    const sheet = getSs_().getSheetByName(PP.TICKETS);
+    if (!sheet) throw new Error('Sheet Participants belum dibuat.');
+    const last = sheet.getLastRow();
+    rows = last < 2 ? [] : sheet.getRange(2, 1, last - 1, 4).getValues();
+    writeCache_(ticketsKey, rows, 300);
+  }
+  const matches = row => String(row[1]) === checkToken && (!hasQr || (legacyQr
+    ? String(row[2]).toLowerCase() === qrToken.toLowerCase()
+    : compactQrToken_(String(row[2])) === qrToken));
+  const idx = rows.findIndex(matches);
+  const checkedKey = idx < 0 ? '' : 'checked:' + sheetId + ':' + checkToken + ':' + rows[idx][2];
+  const cached = checkedKey && readCache_(checkedKey);
+  if (cached) return { ...cached, alreadyChecked: true };
+
+  if (idx < 0) {
+    appendAudit_('INVALID_CHECK', '', 'Token pengecekan atau QR lama tidak cocok');
+    throw new Error('Token pengecekan tidak ditemukan atau tidak cocok dengan tiket.');
+  }
+  const sheet = getSs_().getSheetByName(PP.TICKETS);
+  // ponytail: scan pertama tetap serial; jika uji beban gagal, perlu backend transaksional.
+  const result = withLock_(() => {
+    // Timestamp pertama hanya dibaca di dalam lock, bukan dari snapshot sebelum lock.
     if (getSetting_('STATUS') !== 'LIVE') throw new Error('Sesi pengecekan Hidden Prize belum dibuka atau sudah ditutup.');
-    const rows = getTicketRows_();
-    const idx = rows.findIndex(r => String(r[1]) === checkToken && String(r[2]) === qrToken);
-    if (idx < 0) {
-      appendAudit_('INVALID_CHECK', '', 'Token cek dan QR tidak cocok');
-      throw new Error('Token tidak cocok dengan nomor tiket pada QR yang dipindai.');
+    const row = sheet.getRange(idx + 2, 1, 1, PP.HEADERS.length).getValues()[0];
+    if (!matches(row)) {
+      removeCache_(ticketsKey);
+      appendAudit_('INVALID_CHECK', '', 'Token pengecekan atau QR lama tidak cocok');
+      throw new Error('Token pengecekan tidak ditemukan atau tidak cocok dengan tiket.');
     }
-    const row = rows[idx];
     const alreadyChecked = !!row[4];
     if (!alreadyChecked) {
-      getSs_().getSheetByName(PP.TICKETS).getRange(idx + 2, 5).setValue(new Date());
+      sheet.getRange(idx + 2, 5).setValue(new Date());
       appendAudit_('FIRST_CHECK', String(row[0]), 'Hasil ditampilkan; status=' + (row[3] === true));
     }
     return {
@@ -177,13 +216,15 @@ function verifyTicket_(p) {
       eligible: row[3] === true,
       alreadyChecked,
     };
-  });
+  }, 100);
+  writeCache_(checkedKey, result, 300);
+  return result;
 }
 
 function adminStats_() {
   const rows = getTicketRows_();
   return {
-    ...publicInfo_(),
+    ...publicInfo_(rows),
     lockedAt: getSetting_('LOCKED_AT') || '',
     selected: rows.filter(r => r[3] === true).length,
     tickets: rows.map(row => ({
@@ -203,14 +244,14 @@ function generateTickets_(requestedCount) {
   for (let i = 1; i <= count; i++) {
     const num = ('000' + i).slice(-3);
     let token;
-    do { token = randomToken_(); } while (seen.has(token));
-    seen.add(token);
+    do { token = randomToken_(); } while (seen.has(compactQrToken_(token)));
+    seen.add(compactQrToken_(token));
     rows.push([num, PP.YEAR + num, token, false, '']);
   }
   setSetting_('TICKET_COUNT', String(count));
   getSs_().getSheetByName(PP.TICKETS).getRange(2, 1, count, PP.HEADERS.length).setValues(rows);
   setSetting_('STATUS', 'TICKETS_READY');
-  appendAudit_('GENERATE_TICKETS', '', count + ' tiket QR unik dibuat tanpa penentuan hasil');
+  appendAudit_('GENERATE_TICKETS', '', count + ' tiket dibuat dengan nomor dan token unik tanpa penentuan hasil');
   return adminStats_();
 }
 
@@ -258,6 +299,7 @@ function changeStatus_(expected, next) {
     throw new Error('Validasi ' + count + ' tiket dan 8 TRUE gagal.');
   }
   setSetting_('STATUS', next);
+  if (next === 'LIVE') writeCache_('tickets:' + PropertiesService.getScriptProperties().getProperty('SHEET_ID'), rows.map(row => row.slice(0, 4)), 300);
   appendAudit_('STATUS', '', expected + ' → ' + next);
   return adminStats_();
 }
@@ -278,13 +320,54 @@ function hashText_(value) {
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
   return Utilities.base64Encode(digest);
 }
+function compactQrToken_(token) {
+  if (!/^[a-f0-9]{64}$/i.test(token)) throw new Error('QR rahasia tiket tidak valid.');
+  // Alias 96-bit untuk klien lama; token database tidak diubah.
+  const hex = token.slice(20, 32) + token.slice(52, 64);
+  const bytes = hex.match(/../g).map(byte => {
+    const value = parseInt(byte, 16);
+    return value > 127 ? value - 256 : value;
+  });
+  return Utilities.base64EncodeWebSafe(bytes);
+}
 function randomToken_() {
   return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').toLowerCase();
 }
-function withLock_(fn) {
+function withLock_(fn, waitMs) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(25000);
-  try { return fn(); } finally { lock.releaseLock(); }
+  if (waitMs !== undefined) {
+    if (!lock.tryLock(waitMs)) {
+      const error = new Error('Server sedang sibuk memproses verifikasi lain. Coba beberapa saat lagi.');
+      error.code = 'BUSY';
+      throw error;
+    }
+  } else {
+    lock.waitLock(25000);
+  }
+  try {
+    return fn();
+  } finally {
+    try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+  }
+}
+function readCache_(key) {
+  try {
+    const raw = typeof CacheService !== 'undefined' ? CacheService.getScriptCache()?.get(key) : null;
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+function writeCache_(key, data, seconds) {
+  try {
+    const json = JSON.stringify(data);
+    if (json.length <= 100000 && typeof CacheService !== 'undefined') {
+      CacheService.getScriptCache()?.put(key, json, Math.max(1, Math.min(seconds || 300, 21600)));
+    }
+  } catch (_) {}
+}
+function removeCache_(key) {
+  try {
+    if (typeof CacheService !== 'undefined') CacheService.getScriptCache()?.remove(key);
+  } catch (_) {}
 }
 function getSs_() {
   const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
@@ -306,6 +389,9 @@ function getSetting_(key) {
   return item ? String(item[1]) : '';
 }
 function setSetting_(key, value) {
+  const sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  removeCache_('public:' + sheetId);
+  if (key === 'STATUS') removeCache_('tickets:' + sheetId);
   const sh = getSs_().getSheetByName(PP.SETTINGS);
   if (sh.getLastRow() > 1) {
     const keys = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();

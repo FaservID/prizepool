@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import QRCode from 'qrcode';
+import { participantUrl } from '../src/api.js';
 import {
   formatDatetime, createZipBlob, generateQrCanvas, renderTicketCardToCanvas,
   canvasToJpegBlob, bulkGenerateTicketsZip, downloadBlob,
@@ -10,7 +11,6 @@ const tickets = Array.from({ length: 65 }, (_, i) => {
   const registrationNumber = String(i + 1).padStart(3, '0');
   return { registrationNumber, checkToken: `2027${registrationNumber}`, token: (i + 1).toString(16).padStart(64, '0') };
 });
-const participantUrl = token => `https://example.test/prizepool/?qr=${token}`;
 
 // Canvas recorder tests geometry and failure handling, not browser rasterization or QR decoding.
 function browserMock(t, { noContext = false, imageError = false, jpeg = new Blob(['jpeg'], { type: 'image/jpeg' }) } = {}) {
@@ -18,9 +18,12 @@ function browserMock(t, { noContext = false, imageError = false, jpeg = new Blob
   const images = [];
   const origDoc = globalThis.document;
   const origImg = globalThis.Image;
+  const origWin = globalThis.window;
+  globalThis.window = { location: { origin: 'https://example.test' } };
   t.after(() => {
     globalThis.document = origDoc;
     globalThis.Image = origImg;
+    globalThis.window = origWin;
   });
   const makeCanvas = () => {
     const calls = [];
@@ -146,6 +149,21 @@ test('QR keeps integer modules and at least four-module quiet zone', async t => 
   }
 });
 
+test('Participant URLs omit ticket data and retain H correction with logos', async t => {
+  browserMock(t);
+  const url = participantUrl();
+  const parsed = new URL(url);
+  assert.equal(parsed.origin, 'https://example.test');
+  assert.equal(parsed.pathname, '/');
+  assert.equal(parsed.search, '');
+  assert.equal(url, participantUrl('0123456789abcdef'.repeat(4)));
+  for (const logoSrc of ['', 'data:image/png;base64,local']) {
+    const qr = await generateQrCanvas(url, { logoSrc });
+    const moduleCount = Math.sqrt(qr.ctx.calls.filter(call => call.name === 'fillRect').length - 1);
+    assert.equal(moduleCount, QRCode.create(url, { errorCorrectionLevel: 'H' }).modules.size);
+  }
+});
+
 test('Centered logo stays unobstructed without covering mandatory QR patterns', async t => {
   const { images } = browserMock(t);
   // Original versions 7+ can place alignment patterns in the logo area.
@@ -254,18 +272,21 @@ test('Bulk export requires valid distinct ticket pairs before rendering', async 
   await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl), /Nomor registrasi di luar rentang atau duplikat/);
   await assert.rejects(bulkGenerateTicketsZip(tickets, null), /Fungsi URL/);
   await assert.rejects(bulkGenerateTicketsZip(Array(65).fill(tickets[0]), participantUrl), /duplikat/);
-  await assert.rejects(bulkGenerateTicketsZip(tickets.map((v, i) => i ? v : { ...v, token: '' }), participantUrl), /QR rahasia/);
+  await assert.rejects(bulkGenerateTicketsZip(tickets.map((v, i) => i ? v : { ...v, checkToken: '2027999' }), participantUrl), /token pengecekan/);
   await assert.rejects(bulkGenerateTicketsZip(tickets, () => ''), /URL peserta/);
 });
 
-test('Bulk exports only square QR images for configurable ticket counts', async t => {
+test('Bulk exports identical universal QR images without requiring ticket secrets', async t => {
   const { canvases } = browserMock(t);
   const smallTickets = Array.from({ length: 8 }, (_, i) => {
     const registrationNumber = String(i + 1).padStart(3, '0');
-    return { registrationNumber, checkToken: `2027${registrationNumber}`, token: (i + 1).toString(16).padStart(64, '0') };
+    return { registrationNumber, checkToken: `2027${registrationNumber}` };
   });
   const progress = [];
-  const zip = await bulkGenerateTicketsZip(smallTickets, participantUrl, { size: 1024 }, (...args) => progress.push(args), 8);
+  const zip = await bulkGenerateTicketsZip(smallTickets, (...args) => {
+    assert.deepEqual(args, [], 'QR URL must not depend on a ticket secret');
+    return participantUrl();
+  }, { size: 1024 }, (...args) => progress.push(args), 8);
   const files = await unzipStored(zip);
   assert.equal(files.length, 8);
   assert.equal(files[0].name, 'Tiket_GardenBloom_001.jpg');

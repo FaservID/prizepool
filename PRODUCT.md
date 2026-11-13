@@ -21,9 +21,9 @@ Tiket disiapkan sebelum acara, dibagikan saat registrasi, dan diperiksa melalui 
 ## Capabilities and Constraints
 
 - Jumlah tiket dikonfigurasi panitia saat DRAFT, sebelum tiket dibuat. Default 65 untuk kompatibilitas acara lama; rentang implementasi 8–999 mempertahankan nomor 3 digit dan tepat 8 TRUE dari EO.
-- Sesudah dibuat, jumlah tiket dan QR terkunci. Nomor berurutan mulai 001; token tetap 2027XXX. CSV EO, statistik, ekspor JPG/ZIP, dan cetak mengikuti jumlah tersimpan.
+- Sesudah dibuat, jumlah dan data tiket terkunci. Nomor berurutan mulai 001; token tetap 2027XXX. CSV EO, statistik, ekspor JPG/ZIP, dan cetak mengikuti jumlah tersimpan.
 - Peserta, login, dan admin memakai light mode saja, tanpa mengikuti tema OS atau preferensi dark lama.
-- QR rahasia harus cocok dengan token pengecekan. Hasil diimpor sekali, dikunci, dan tidak berubah ketika dipindai ulang.
+- QR universal mengarahkan peserta ke tautan aplikasi, dan peserta memasukkan token pengecekan pada tiket fisik. Hasil diimpor sekali, dikunci, dan tidak berubah ketika dipindai ulang.
 - Pertahankan backend Google Apps Script dan alur DRAFT, TICKETS_READY, IMPORTING, LOCKED, LIVE, CLOSED.
 - Remake mencakup halaman peserta dan admin yang responsif.
 - QR cetak harus menerima logo perusahaan dari unggahan pengguna, ditempatkan di tengah.

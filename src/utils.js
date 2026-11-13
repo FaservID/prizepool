@@ -560,19 +560,12 @@ export async function bulkGenerateTicketsZip(
     throw new Error('Fungsi URL peserta wajib disediakan.');
   }
 
-  const tokens = new Set();
-  for (const ticket of tickets) {
-    if (!/^[a-f0-9]{64}$/i.test(ticket.token || '') || tokens.has(ticket.token.toLowerCase())) {
-      throw new Error('Nomor atau QR rahasia tiket tidak valid atau duplikat.');
-    }
-    tokens.add(ticket.token.toLowerCase());
-  }
   const files = [];
   const total = count;
 
   for (let i = 0; i < total; i++) {
     const ticket = tickets[i];
-    const url = getParticipantUrl(ticket.token);
+    const url = getParticipantUrl();
     if (!url || typeof url !== 'string') {
       throw new Error(`URL peserta tiket ${ticket.registrationNumber} tidak valid.`);
     }
