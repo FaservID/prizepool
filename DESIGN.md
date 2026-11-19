@@ -14,7 +14,7 @@ Desain peserta merefleksikan komposisi botani bertema Garden Bloom dan identitas
 ## Copy & Voice
 
 - Bahasa Indonesia lugas, profesional, dan ramah untuk acara internal perusahaan.
-- Nomor registrasi 3 digit mulai `001` sampai jumlah tiket tersimpan (8–999); token 7 digit berupa `2027` + nomor registrasi. Default 65 tetap didukung untuk acara lama.
+- Nomor registrasi 3 digit mulai `001` sampai jumlah tiket tersimpan (8–999); token baru 7 digit berupa `2027` + digit nomor urutan akhir, awal, tengah (`014` menjadi `2027401`). Cetak ulang dan tampilan selalu memakai token tersimpan, termasuk format lama. Default 65 tetap didukung untuk acara lama.
 - Tidak ada badge dekoratif kosong atau status palsu; status berasal dari Google Apps Script.
 
 ## Color Palette & Measured Contrast

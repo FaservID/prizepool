@@ -36,14 +36,26 @@ export function normalizeRegistrationNumber(value, maxParticipants = 999) {
   return String(n).padStart(3, '0');
 }
 
+export function buildCheckToken(value) {
+  const number = normalizeRegistrationNumber(value);
+  return `2027${number[2]}${number[0]}${number[1]}`;
+}
+
+function isValidCheckToken(number, token) {
+  // Kompatibilitas data tersimpan, bukan alias tambahan pada pengecekan peserta.
+  return token === buildCheckToken(number) || token === `2027${number}`;
+}
+
 export function validateTicketSet(tickets, expectedCount = tickets?.length) {
   const count = validateTicketCount(expectedCount);
   if (!Array.isArray(tickets) || tickets.length !== count) throw new Error(`Daftar tiket harus berisi tepat ${count} tiket.`);
   const numbers = new Set();
+  const tokens = new Set();
   for (const ticket of tickets) {
     validatePrintableTicket(ticket);
-    if (Number(ticket.registrationNumber) > count || numbers.has(ticket.registrationNumber)) throw new Error('Nomor registrasi di luar rentang atau duplikat.');
+    if (Number(ticket.registrationNumber) > count || numbers.has(ticket.registrationNumber) || tokens.has(ticket.checkToken)) throw new Error('Nomor registrasi di luar rentang atau nomor/token duplikat.');
     numbers.add(ticket.registrationNumber);
+    tokens.add(ticket.checkToken);
   }
   return count;
 }
@@ -88,14 +100,15 @@ export function parseEoRows(rows, expectedCount = 65) {
   const result = rows.slice(1).map((r, i) => {
     const registrationNumber = normalizeRegistrationNumber(r[n], count);
     const checkToken = String(r[t] || '').trim();
-    if (checkToken !== `2027${registrationNumber}`) throw new Error(`Baris ${i + 2}: token harus 2027${registrationNumber}`);
+    if (!isValidCheckToken(registrationNumber, checkToken)) throw new Error(`Baris ${i + 2}: token tidak cocok untuk nomor ${registrationNumber}. Gunakan token dari format CSV unduhan.`);
     const raw = String(r[s] ?? '').trim().toUpperCase();
     if (raw !== 'TRUE' && raw !== 'FALSE') throw new Error(`Baris ${i + 2}: terpilih wajib TRUE atau FALSE.`);
     return { registrationNumber, checkToken, selected: raw === 'TRUE' };
   });
   if (result.length !== count) throw new Error(`Berkas harus berisi tepat ${count} data. Terbaca: ${result.length}.`);
   const numbers = new Set(result.map(r => r.registrationNumber));
-  if (numbers.size !== count) throw new Error('Ada nomor registrasi duplikat.');
+  const tokens = new Set(result.map(r => r.checkToken));
+  if (numbers.size !== count || tokens.size !== count) throw new Error('Ada nomor registrasi atau token duplikat.');
   return result;
 }
 
@@ -358,7 +371,7 @@ export async function generateQrCanvas(text, options = {}) {
 }
 
 function validatePrintableTicket(ticket) {
-  if (!ticket || normalizeRegistrationNumber(ticket.registrationNumber) !== ticket.registrationNumber || ticket.checkToken !== `2027${ticket.registrationNumber}`) {
+  if (!ticket || normalizeRegistrationNumber(ticket.registrationNumber) !== ticket.registrationNumber || !isValidCheckToken(ticket.registrationNumber, ticket.checkToken)) {
     throw new Error('Nomor registrasi atau token pengecekan tiket tidak valid.');
   }
 }

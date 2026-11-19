@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isConfigured, participantUrl, pollAdminStats, prizePoolRequest } from './api.js';
 import {
   STATUS_NAMES,
+  buildCheckToken,
   buildEoCsv,
   bulkGenerateTicketsZip,
   canvasToJpegBlob,
@@ -220,6 +221,13 @@ function AdminPage({ refreshPublicInfo }) {
   const exportDisabled = busy || !!exporting || logoLoading || previewLoading || !!previewError;
   const ticketCount = data?.maxParticipants ?? 65;
   const ticketsReady = data?.total === ticketCount && data?.tickets?.length === ticketCount;
+  let excelTemplateMatches = false;
+  if (ticketsReady && ticketCount === 65) {
+    try {
+      validateTicketSet(data.tickets, ticketCount);
+      excelTemplateMatches = data.tickets.every(ticket => ticket.checkToken === buildCheckToken(ticket.registrationNumber));
+    } catch { /* Data invalid tetap tampil, tanpa menawarkan template yang tidak cocok. */ }
+  }
   const lastNumber = String(ticketCount).padStart(3, '0');
   const sessionDisabled = busy || !!exporting;
 
@@ -501,7 +509,7 @@ function AdminPage({ refreshPublicInfo }) {
           <details className="panel collapsible-panel" open aria-labelledby="flow-title">
             <summary><h2 id="flow-title">Pengaturan sesi</h2></summary>
             <div className="section-heading"><p>Hasil dikunci selama sesi. Untuk mengimpor hasil baru, reset sesi terlebih dahulu. Nomor tiket dan QR tetap sama.</p></div>
-            {data?.status !== 'DRAFT' && <p className="field-help">Jumlah terkunci: {ticketCount} tiket. Nomor 001–{lastNumber}, token 2027001–2027{lastNumber}.</p>}
+            {data?.status !== 'DRAFT' && <p className="field-help">Jumlah terkunci: {ticketCount} tiket. Nomor 001–{lastNumber}. Gunakan token yang tercantum pada tiket dan daftar di bawah.</p>}
             <div className="session-actions">
               {data?.status === 'DRAFT' && <div>
                 <h3>Siapkan tiket</h3>
@@ -514,7 +522,7 @@ function AdminPage({ refreshPublicInfo }) {
                   <button type="submit" className="btn btn-primary" disabled={sessionDisabled}>{busy ? 'Menyiapkan…' : 'Buat tiket'}</button>
                 </form>
               </div>}
-              {ticketsReady && <div><h3>Format hasil</h3><p>Isi kolom terpilih dengan TRUE untuk tiket terpilih dan FALSE untuk lainnya pada seluruh {ticketCount} baris. Jumlah terpilih mengikuti berkas. Unggah CSV atau Excel (.xlsx); untuk Excel, isi tab EO_Import.</p><div className="button-row"><button type="button" className="btn btn-outline" disabled={sessionDisabled} onClick={downloadTemplate}>Unduh format CSV</button>{ticketCount === 65 && <a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh format Excel (65 tiket)</a>}</div></div>}
+              {ticketsReady && <div><h3>Format hasil</h3><p>Isi kolom terpilih dengan TRUE untuk tiket terpilih dan FALSE untuk lainnya pada seluruh {ticketCount} baris. Jumlah terpilih mengikuti berkas. Unggah CSV atau Excel (.xlsx); untuk Excel, isi tab EO_Import.</p><div className="button-row"><button type="button" className="btn btn-outline" disabled={sessionDisabled} onClick={downloadTemplate}>Unduh format CSV</button>{excelTemplateMatches && <a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh format Excel (65 tiket)</a>}</div></div>}
               {data?.status === 'TICKETS_READY' && <div><h3>Impor dan kunci data</h3><p>Periksa kembali data sebelum diimpor. Hasil terkunci sampai panitia melakukan reset sesi.</p><label htmlFor="eo-csv">Unggah berkas CSV atau Excel</label><input id="eo-csv" className="file-input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby="results-file-help" disabled={busy || !!exporting} onChange={importEo} /><p id="results-file-help" className="field-help">Maksimal 2 MB. Periksa jumlah terpilih pada konfirmasi sebelum mengunci hasil.</p></div>}
               {data?.status === 'IMPORTING' && <div><h3>Impor sedang diproses</h3><p>Tunggu hingga selesai, lalu segarkan data. Jika status tetap sama, reset sesi sebelum mengimpor ulang.</p></div>}
               {data?.status === 'RESETTING' && <div><h3>Reset belum selesai</h3><p>Pengecekan peserta dan impor hasil dinonaktifkan. Segarkan data. Jika status tetap sama, ulangi reset sesi.</p></div>}

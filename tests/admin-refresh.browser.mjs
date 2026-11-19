@@ -31,7 +31,7 @@ window.URL = class extends NativeURL {
 };
 const tickets = Array.from({ length: 8 }, (_, index) => ({
   registrationNumber: String(index + 1).padStart(3, '0'),
-  checkToken: '2027' + String(index + 1).padStart(3, '0'),
+  checkToken: '2027' + String(index + 1).padStart(3, '0').slice(-1) + String(index + 1).padStart(3, '0').slice(0, 2),
   token: String(index + 1).padStart(64, '0'), eligible: index === 0, checkedAt: '',
 }));
 let nextFailure = '';
@@ -39,7 +39,7 @@ HTMLFormElement.prototype.submit = function () {
   const values = Object.fromEntries([...this.elements].map(input => [input.name, input.value]));
   const payload = JSON.parse(values.payload);
   __check.requests.push(payload.action);
-  const data = { status: 'LIVE', title: 'Isolated refresh test', total: 8, maxParticipants: 8,
+  const data = { status: 'LIVE', title: 'Isolated refresh test', total: tickets.length, maxParticipants: tickets.length,
     checked: tickets.filter(ticket => ticket.checkedAt).length, selected: 1, lockedAt: '',
     tickets: tickets.map(ticket => ({ ...ticket })) };
   const failure = payload.action === 'adminStats' ? nextFailure : '';
@@ -57,6 +57,7 @@ const wait = async (predicate, message) => {
 };
 const button = text => [...document.querySelectorAll('button')].find(element => element.textContent.trim() === text);
 const checkedRows = () => [...document.querySelectorAll('tbody tr')].filter(row => row.textContent.includes('Sudah diperiksa')).length;
+const hasError = text => [...document.querySelectorAll('.notice-error')].some(notice => notice.textContent.includes(text));
 const mark = index => { tickets[index].checkedAt = '2026-11-19T10:00:00.000Z'; };
 async function check() {
   await wait(() => document.querySelector('#admin-password'), 'login missing');
@@ -105,7 +106,7 @@ async function check() {
   mark(3);
   nextFailure = 'Isolated connection failure';
   button('Segarkan data').click();
-  await wait(() => document.body.textContent.includes('Isolated connection failure'), 'request error missing');
+  await wait(() => hasError('Isolated connection failure'), 'request error missing');
   if (checkedRows() !== 3) throw new Error('failed request lost previous data');
   await wait(() => button('Segarkan data')?.disabled === false, 'failed request still busy');
   button('Segarkan data').click();
@@ -120,14 +121,37 @@ async function check() {
   if (!lastSync?.dateTime) throw new Error('last successful refresh time missing');
   const previousTime = lastSync.dateTime;
   nextFailure = 'Domain website belum diizinkan. Isolated automatic failure';
-  await wait(() => document.body.textContent.includes('Pembaruan otomatis gagal: Domain website belum diizinkan.'), 'automatic refresh hides server error');
+  await wait(() => hasError('Pembaruan otomatis gagal: Domain website belum diizinkan.'), 'automatic refresh hides server error');
   if (document.querySelector('time').dateTime !== previousTime) throw new Error('failed refresh advanced successful timestamp');
   if (checkedRows() !== 5) throw new Error('automatic failure lost checked rows');
   __check.steps.push('automatic failure shows actual error and retains last successful time');
+  button('Jeda pembaruan otomatis').click();
+  await wait(() => button('Aktifkan pembaruan otomatis'), 'pause after failure did not finish');
+  tickets.splice(0, tickets.length, ...Array.from({ length: 65 }, (_, index) => {
+    const number = String(index + 1).padStart(3, '0');
+    return { registrationNumber: number, checkToken: '2027' + number[2] + number.slice(0, 2),
+      token: String(index + 1).padStart(64, '0'), eligible: false, checkedAt: '' };
+  }));
+  const excelLink = () => document.querySelector('a[download][href$=".xlsx"]');
+  const tokenAt = number => [...document.querySelectorAll('tbody tr')].find(row => row.cells[0]?.textContent === number)?.cells[1]?.textContent;
+  button('Segarkan data').click();
+  await wait(() => tokenAt('014') === '2027401' && button('Segarkan data')?.disabled === false, 'rotated tokens did not load');
+  if (!excelLink()) throw new Error('matching 65-ticket Excel template missing');
+  for (const ticket of tickets) ticket.checkToken = '2027' + ticket.registrationNumber;
+  button('Segarkan data').click();
+  await wait(() => tokenAt('014') === '2027014' && button('Segarkan data')?.disabled === false, 'legacy tokens did not remain visible');
+  if (excelLink()) throw new Error('incompatible Excel template offered for legacy tickets');
+  __check.steps.push('rotated token 014 and Excel template compatibility, legacy tokens unchanged');
   __check.ok = true;
 }
 addEventListener('DOMContentLoaded', () => {
-  check().catch(error => { __check.failure = String(error.stack || error); }).finally(() => {
+  check().catch(error => {
+    __check.failure = String(error.stack || error);
+    __check.state = { count: document.querySelectorAll('tbody tr').length,
+      rows: [...document.querySelectorAll('tbody tr')].slice(0, 15).map(row => row.textContent),
+      errors: [...document.querySelectorAll('.notice-error')].map(notice => notice.textContent),
+      refresh: button('Segarkan data')?.disabled };
+  }).finally(() => {
     const output = document.createElement('pre'); output.id = 'test-result';
     output.textContent = JSON.stringify(__check); document.body.append(output);
   });

@@ -3,13 +3,13 @@ import test from 'node:test';
 import QRCode from 'qrcode';
 import { participantUrl } from '../src/api.js';
 import {
-  formatDatetime, createZipBlob, generateQrCanvas, renderTicketCardToCanvas,
+  buildCheckToken, formatDatetime, createZipBlob, generateQrCanvas, renderTicketCardToCanvas,
   canvasToJpegBlob, bulkGenerateTicketsZip, downloadBlob,
 } from '../src/utils.js';
 
 const tickets = Array.from({ length: 65 }, (_, i) => {
   const registrationNumber = String(i + 1).padStart(3, '0');
-  return { registrationNumber, checkToken: `2027${registrationNumber}`, token: (i + 1).toString(16).padStart(64, '0') };
+  return { registrationNumber, checkToken: buildCheckToken(registrationNumber), token: (i + 1).toString(16).padStart(64, '0') };
 });
 
 // Canvas recorder tests geometry and failure handling, not browser rasterization or QR decoding.
@@ -253,6 +253,9 @@ test('Ticket card doubles pixel resolution, disables QR smoothing, fits custom t
   const text = card.ctx.calls.filter(c => c.name === 'fillText').map(c => c.args[0]).join('\n');
   assert.doesNotMatch(text, /\bEO\b/);
   assert.match(text, /Tunjukkan tiket fisik asli kepada panitia\./);
+  assert.ok(text.includes('2027100'), 'Card must print stored rotated token');
+  const legacyCard = await renderTicketCardToCanvas({ ...tickets[0], checkToken: '2027001' }, qr);
+  assert.ok(legacyCard.ctx.calls.some(c => c.name === 'fillText' && String(c.args[0]).includes('2027001')), 'Old cards must retain stored token');
   const defaultCard = await renderTicketCardToCanvas(tickets[0], qr);
   assert.ok(!defaultCard.ctx.calls.some(c => c.name === 'fillText' && /NUSANTARA/.test(c.args[0])));
   await assert.rejects(renderTicketCardToCanvas({ ...tickets[0], checkToken: '2027002' }, qr), /token pengecekan/);
@@ -272,7 +275,7 @@ test('JPEG rejects null, empty, unsupported output, invalid quality and thrown s
 
 test('Bulk export requires valid distinct ticket pairs before rendering', async () => {
   await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl, {}, null, 65), /tepat 65 tiket/);
-  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl), /Nomor registrasi di luar rentang atau duplikat/);
+  await assert.rejects(bulkGenerateTicketsZip(tickets.slice(1), participantUrl), /Nomor registrasi di luar rentang atau nomor\/token duplikat/);
   await assert.rejects(bulkGenerateTicketsZip(tickets, null), /Fungsi URL/);
   await assert.rejects(bulkGenerateTicketsZip(Array(65).fill(tickets[0]), participantUrl), /duplikat/);
   await assert.rejects(bulkGenerateTicketsZip(tickets.map((v, i) => i ? v : { ...v, checkToken: '2027999' }), participantUrl), /token pengecekan/);
@@ -283,7 +286,7 @@ test('Bulk exports identical universal QR images without requiring ticket secret
   const { canvases } = browserMock(t);
   const smallTickets = Array.from({ length: 8 }, (_, i) => {
     const registrationNumber = String(i + 1).padStart(3, '0');
-    return { registrationNumber, checkToken: `2027${registrationNumber}` };
+    return { registrationNumber, checkToken: buildCheckToken(registrationNumber) };
   });
   const progress = [];
   const zip = await bulkGenerateTicketsZip(smallTickets, (...args) => {

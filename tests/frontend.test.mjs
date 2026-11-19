@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import {
-  STATUS_NAMES, buildEoCsv, parseEoCsv, parseEoRows, parseEoFile, normalizeRegistrationNumber, validateTicketCount, validateTicketSet,
+  STATUS_NAMES, buildCheckToken, buildEoCsv, parseEoCsv, parseEoRows, parseEoFile, normalizeRegistrationNumber, validateTicketCount, validateTicketSet,
 } from '../src/utils.js';
 
 for (const value of [8, 65, 100, 999, '8', '100', ' 999 ']) {
@@ -16,16 +16,21 @@ assert.equal(normalizeRegistrationNumber('001'), '001');
 assert.equal(normalizeRegistrationNumber('999'), '999');
 assert.throws(() => normalizeRegistrationNumber('066', 65), /001–065/);
 for (const value of ['0', '1000', 'abc']) assert.throws(() => normalizeRegistrationNumber(value));
+for (const [number, token] of [['001', '2027100'], ['014', '2027401'], ['052', '2027205'], ['065', '2027506'], ['100', '2027010'], ['999', '2027999']]) {
+  assert.equal(buildCheckToken(number), token);
+}
+for (const value of [null, '', '000', '1000', '1.4', 'abc']) assert.throws(() => buildCheckToken(value));
+assert.equal(new Set(Array.from({ length: 999 }, (_, i) => buildCheckToken(i + 1))).size, 999);
 
 for (const count of [8, 65, 100, 999]) {
   const tickets = Array.from({ length: count }, (_, i) => {
     const registrationNumber = String(i + 1).padStart(3, '0');
-    return { registrationNumber, checkToken: `2027${registrationNumber}` };
+    return { registrationNumber, checkToken: buildCheckToken(registrationNumber) };
   });
   assert.equal(validateTicketSet(tickets, count), count);
   const empty = buildEoCsv([...tickets].reverse(), count);
   assert.equal(empty.trim().split('\r\n').length, count + 1);
-  assert.ok(empty.includes('001,2027001,FALSE'));
+  assert.ok(empty.includes('001,2027100,FALSE'));
   assert.equal(parseEoCsv(empty, count).filter(row => row.selected).length, 0);
   for (const selected of [1, 3, 7, 8, count]) {
     const dynamic = empty.trim().split('\r\n').map((row, i) => i > 0 && i <= selected ? row.replace(/FALSE$/, 'true') : row).join('\r\n');
@@ -39,10 +44,10 @@ for (const count of [8, 65, 100, 999]) {
   assert.equal(results.filter(row => row.selected).length, 8);
   assert.equal(results[0].registrationNumber, '001');
   assert.equal(results.at(-1).registrationNumber, String(count).padStart(3, '0'));
-  assert.throws(() => parseEoCsv(valid.replace('2027001', '2027999'), count), /token harus/);
-  assert.throws(() => parseEoCsv(valid.replace('002,2027002', '001,2027001'), count), /duplikat/);
+  assert.throws(() => parseEoCsv(valid.replace('2027100', '2027999'), count), /token tidak cocok/);
+  assert.throws(() => parseEoCsv(valid.replace('002,2027200', '001,2027100'), count), /duplikat/);
   assert.throws(() => parseEoCsv(valid.replace('TRUE', 'YEAH'), count), /TRUE atau FALSE/);
-  assert.throws(() => parseEoCsv(valid.replace('008,2027008,TRUE\r\n', ''), count), new RegExp(`${count} data`));
+  assert.throws(() => parseEoCsv(valid.replace('008,2027800,TRUE\r\n', ''), count), new RegExp(`${count} data`));
   assert.throws(() => buildEoCsv(tickets.slice(0, -1), count), new RegExp(`tepat ${count} tiket`));
   assert.throws(() => validateTicketSet([...tickets.slice(0, -1), tickets[0]], count), /duplikat/);
   assert.throws(() => buildEoCsv(tickets.map((row, i) => i ? row : { ...row, checkToken: '2027999' }), count), /token pengecekan/);
@@ -51,17 +56,28 @@ for (const count of [8, 65, 100, 999]) {
   if (count === 65) assert.equal(parseEoCsv(valid).length, 65); // Kompatibilitas default acara lama.
   if (count < 999) {
     const outOfRange = String(count + 1).padStart(3, '0');
-    assert.throws(() => parseEoCsv(valid.replace('001,2027001', `${outOfRange},2027${outOfRange}`), count), /Nomor registrasi harus/);
-    assert.throws(() => validateTicketSet([...tickets.slice(0, -1), { registrationNumber: outOfRange, checkToken: `2027${outOfRange}` }], count), /di luar rentang/);
+    assert.throws(() => parseEoCsv(valid.replace('001,2027100', `${outOfRange},${buildCheckToken(outOfRange)}`), count), /Nomor registrasi harus/);
+    assert.throws(() => validateTicketSet([...tickets.slice(0, -1), { registrationNumber: outOfRange, checkToken: buildCheckToken(outOfRange) }], count), /di luar rentang/);
   }
-  if (count > 8) assert.equal(parseEoCsv(valid.replace('009,2027009,FALSE', '009,2027009,TRUE'), count).filter(row => row.selected).length, 9);
+  if (count > 8) assert.equal(parseEoCsv(valid.replace('009,2027900,FALSE', '009,2027900,TRUE'), count).filter(row => row.selected).length, 9);
 }
+// Format lama tetap dapat diekspor/impor tanpa mengubah token tersimpan.
+const legacyTickets = Array.from({ length: 100 }, (_, i) => {
+  const registrationNumber = String(i + 1).padStart(3, '0');
+  return { registrationNumber, checkToken: `2027${registrationNumber}` };
+});
+const legacyCsv = buildEoCsv(legacyTickets, 100);
+assert.ok(legacyCsv.includes('014,2027014,FALSE'));
+assert.deepEqual(parseEoCsv(legacyCsv, 100).map(({ selected, ...ticket }) => ticket), legacyTickets);
+const mixedTokens = legacyTickets.map(ticket => ticket.registrationNumber === '001' ? { ...ticket, checkToken: '2027100' } : ticket);
+assert.throws(() => validateTicketSet(mixedTokens, 100), /duplikat/);
+assert.throws(() => parseEoCsv(legacyCsv.replace('001,2027001', '001,2027100'), 100), /duplikat/);
 assert.throws(() => parseEoCsv(''), /kosong/);
-assert.throws(() => parseEoCsv('nomor,token,hasil\n001,2027001,TRUE'), /Header wajib/);
+assert.throws(() => parseEoCsv('nomor,token,hasil\n001,2027100,TRUE'), /Header wajib/);
 assert.throws(() => parseEoCsv('"nomor_registrasi'), /kutip belum ditutup/);
 
 const header = ['nomor_registrasi', 'token_pengecekan', 'terpilih'];
-const excelRows = [header, ...Array.from({ length: 65 }, (_, i) => [i + 1, `2027${String(i + 1).padStart(3, '0')}`, i < 3])];
+const excelRows = [header, ...Array.from({ length: 65 }, (_, i) => [i + 1, buildCheckToken(i + 1), i < 3])];
 assert.equal(parseEoRows(excelRows).filter(row => row.selected).length, 3);
 for (const bad of [null, '', 0, 1, 'yes', 'TRUEE']) {
   assert.throws(() => parseEoRows([header, ...excelRows.slice(1).map((row, i) => i ? row : [row[0], row[1], bad])]), /TRUE atau FALSE/);
@@ -87,7 +103,10 @@ for (const selected of [0, 1, 3, 9, 65]) {
   assert.equal((await parseEoFile(xlsxFixture(rows))).filter(row => row.selected).length, selected);
 }
 const template = readFileSync(new URL('../public/Template_EO_PrizePool_2027.xlsx', import.meta.url));
-assert.equal((await parseEoFile(new File([template], 'template.xlsx'))).filter(row => row.selected).length, 0);
+const templateRows = await parseEoFile(new File([template], 'template.xlsx'));
+assert.ok(templateRows.every(row => row.checkToken === buildCheckToken(row.registrationNumber) && !row.selected));
+assert.equal(templateRows[13].checkToken, '2027401');
+assert.deepEqual(parseEoCsv(readFileSync(new URL('../examples/template_EO_prizepool_2027.csv', import.meta.url), 'utf8')), templateRows);
 assert.deepEqual(template, readFileSync(new URL('../examples/Template_EO_PrizePool_2027.xlsx', import.meta.url)));
 const archive = unzipSync(template);
 const guide = new TextDecoder().decode(archive['xl/worksheets/sheet2.xml']);
@@ -130,6 +149,10 @@ assert.match(app, /aria-pressed=\{autoRefresh\}/);
 assert.match(app, /Jeda pembaruan otomatis/);
 assert.match(app, /<Notice type="error">\{syncError\}<\/Notice>/);
 assert.match(app, /Pembaruan otomatis gagal: \$\{err\.message/);
-assert.match(app, /Data terakhir diterima: <time dateTime=\{lastSyncedAt\.toISOString\(\)\}/);
+assert.match(app, /Data terakhir diterima:/);
+assert.match(app, /<time dateTime=\{lastSyncedAt\.toISOString\(\)\}/);
+assert.match(app, /timeZone: 'Asia\/Jakarta'/);
+assert.doesNotMatch(app, /token 2027001–2027/);
+assert.match(app, /excelTemplateMatches && <a/);
 assert.equal((app.match(/setLastSyncedAt\(new Date\(\)\)/g) || []).length, 2);
 console.log('PASS frontend: konfigurasi tiket/terpilih dinamis, CSV/XLSX, boolean Excel, validasi tiket, source light-only, reset terkonfirmasi, integrasi polling admin dan tombol jeda.');

@@ -6,14 +6,22 @@
 
 | Waktu | Tugas panitia / EO | Sistem |
 |---|---|---|
-| **H-1** | Admin mengisi **Jumlah tiket** pada **Pengaturan sesi**, klik **Buat tiket**, lalu unduh JPG/ZIP atau buka **Pratinjau cetak A4**. | Membuat nomor berurutan mulai `001` dan token `2027` + nomor sebanyak konfigurasi; **belum ada yang TRUE**. Semua QR berisi tautan halaman peserta yang sama, tanpa parameter token. |
+| **H-1** | Admin mengisi **Jumlah tiket** pada **Pengaturan sesi**, klik **Buat tiket**, lalu unduh JPG/ZIP atau buka **Pratinjau cetak A4**. | Membuat nomor berurutan mulai `001` dan token `2027` + digit nomor dalam urutan akhir, awal, tengah sebanyak konfigurasi; **belum ada yang TRUE**. Semua QR berisi tautan halaman peserta yang sama, tanpa parameter token. |
 | **Hari H: registrasi awal** | Bagikan **1 tiket ke 1 karyawan** secara acak. Nama tidak dicatat. | QR universal membuka halaman peserta, tidak memuat nomor tiket, nama, atau pemenang. |
 | **Hari H: sebelum Hidden Prize** | EO memilih **Unduh format CSV** sesuai jumlah tiket, lalu mengisi kolom `terpilih` dengan `TRUE` untuk tiket terpilih dan `FALSE` untuk lainnya. Jumlah terpilih mengikuti berkas. | Hasil belum otomatis terlihat oleh karyawan. Template Excel standar tersedia hanya untuk 65 tiket. |
 | **Sebelum pengumuman** | EO mengirimkan berkas akhir kepada admin, lalu admin memilih **Unggah berkas CSV atau Excel**. | Aplikasi menampilkan jumlah TRUE/FALSE untuk dikonfirmasi; backend memvalidasi seluruh nomor, pasangan token, dan status boolean, lalu mengunci hasil (LOCKED). |
-| **Sesi Hidden Prize** | MC meminta karyawan memindai QR dan memasukkan `2027` + nomor tiket 3 digit (contoh registrasi `052` menjadi `2027052`). Admin memilih **Buka sesi pengecekan**. | Sistem memeriksa token pengecekan saat sesi LIVE, lalu menampilkan status terpilih TRUE / FALSE. |
+| **Sesi Hidden Prize** | MC meminta karyawan memindai QR dan memasukkan token yang tercantum pada tiket. Untuk tiket baru, `2027` diikuti digit nomor dalam urutan akhir, awal, tengah (registrasi `014` menjadi `2027401`). Admin memilih **Buka sesi pengecekan**. | Sistem memeriksa token pengecekan saat sesi LIVE, lalu menampilkan status terpilih TRUE / FALSE. |
 | **Selesai** | Admin memilih **Tutup sesi pengecekan**. | Pengecekan ditutup, riwayat scan tersimpan. |
 
 **Tidak ada pengacakan peserta terpilih di aplikasi.** EO menentukan status `TRUE`/`FALSE` melalui berkas. Jumlah terpilih boleh 0 sampai seluruh tiket; konfirmasi impor memperingatkan jika jumlahnya 0. Tidak ada nama karyawan pada spreadsheet, tiket, atau formulir. Cetak ulang harus memakai QR yang **sama** (jangan generate ulang).
+
+## Format token pengecekan
+
+Tiket baru memakai prefix `2027`, diikuti tiga digit nomor registrasi dalam urutan **akhir, awal, tengah**. Nol tetap dipertahankan: `001` menjadi `2027100`, `014` menjadi `2027401`, `052` menjadi `2027205`, dan `065` menjadi `2027506`. Ini rotasi digit, bukan pembalikan nomor. Token tetap unik untuk nomor `001`–`999`, tetapi tidak membentuk rentang token berurutan.
+
+Perubahan kode tidak mengganti token pada tiket yang sudah tersimpan. Acara format lama tetap memakai pasangan nomor/token aslinya untuk pengecekan, cetak ulang, ekspor, impor, dan reset. Backend mencocokkan token tersimpan secara tepat; tidak menambahkan alias format lain yang dapat menunjuk tiket berbeda. Gunakan token pada tiket atau CSV unduhan dashboard untuk acara berjalan.
+
+Untuk mengaktifkan aturan pembuatan tiket baru, perbarui `apps-script/Code.gs` dan deploy sebagai **New version**. Push GitHub hanya memperbarui frontend, bukan deployment Apps Script. Jangan reset, membuat ulang tiket, atau mengubah kolom token acara berjalan untuk menerapkan pembaruan ini.
 
 ## Konfigurasi jumlah tiket
 
@@ -29,20 +37,22 @@ File unduhan berisi 1 header dan data sebanyak konfigurasi tiket. Contoh konfigu
 
 ```csv
 nomor_registrasi,token_pengecekan,terpilih
-001,2027001,FALSE
-002,2027002,FALSE
-003,2027003,FALSE
+001,2027100,FALSE
+002,2027200,FALSE
+003,2027300,FALSE
 ...
-052,2027052,FALSE
+014,2027401,FALSE
 ...
-065,2027065,FALSE
+052,2027205,FALSE
+...
+065,2027506,FALSE
 ```
 
 EO mengisi `TRUE` pada nomor terpilih dan `FALSE` pada lainnya, tanpa menghapus baris, mengganti nomor, atau mengganti token. Huruf besar/kecil diterima; sel kosong atau nilai selain TRUE/FALSE ditolak. Backend tetap menolak jumlah baris yang tidak sesuai konfigurasi, nomor duplikat, token salah, dan status bukan boolean. Impor hanya diizinkan sekali per sesi. Hasil terkunci tidak bisa ditimpa; admin harus melakukan reset sesi terlebih dahulu sebelum mengimpor hasil pengganti.
 
 Jika membuka CSV di Excel, kolom `001` dapat berubah menjadi `1` secara otomatis. Importer frontend menerima `1` dan mengubahnya ke `001`. Untuk semua jumlah tiket, gunakan CSV unduhan dashboard yang berasal dari data aktif backend. Simpan hasil akhir sebagai CSV UTF-8. Berkas Excel `.xlsx` juga bisa diunggah langsung: aplikasi membaca tab `EO_Import`, termasuk sel boolean TRUE/FALSE Excel, tanpa mengirim workbook ke layanan luar. Batas unggahan 2 MB; `.xls` tidak didukung.
 
-Template statis `examples/Template_EO_PrizePool_2027.xlsx`, `examples/template_EO_prizepool_2027.csv`, dan XLSX di `public/` berisi 65 tiket. Link Excel pada dashboard hanya tampil untuk konfigurasi 65; kolom nomor pada tab `EO_Import` sudah diformat sebagai teks. Untuk jumlah lain, gunakan CSV dinamis, bukan template statis tersebut. Jika hasil terbaca 0 padahal ada pilihan, pastikan perubahan tersimpan di kolom `terpilih` pada `EO_Import` dan unggah berkas hasil edit, bukan unduhan awal yang seluruhnya FALSE. Untuk CSV, ekspor tab `EO_Import`, bukan `PANDUAN`.
+Template statis `examples/Template_EO_PrizePool_2027.xlsx`, `examples/template_EO_prizepool_2027.csv`, dan XLSX di `public/` berisi 65 tiket dengan urutan token akhir, awal, tengah. Link Excel pada dashboard hanya tampil bila seluruh pasangan token aktif cocok dengan template 65 tiket tersebut; kolom nomor pada tab `EO_Import` sudah diformat sebagai teks. Untuk jumlah lain atau acara dengan token format lama, gunakan CSV dinamis, bukan template statis tersebut. Jika hasil terbaca 0 padahal ada pilihan, pastikan perubahan tersimpan di kolom `terpilih` pada `EO_Import` dan unggah berkas hasil edit, bukan unduhan awal yang seluruhnya FALSE. Untuk CSV, ekspor tab `EO_Import`, bukan `PANDUAN`.
 
 ## Cara update dari proyek `FaservID/prizepool` lama
 
@@ -115,7 +125,7 @@ Setiap reset mengganti `SESSION_ID` internal untuk memisahkan cache hasil lama. 
 
 ## Keamanan / batasan
 
-- **QR universal:** QR Code berisi satu tautan umum tanpa rahasia tiket individual (`?qr=...`). Peserta cukup memindai QR dan memasukkan token `2027NNN` dari tiket fisik. Karena token berurutan (`2027001` dst.), siapa pun yang membuka tautan bisa mengetikkan nomor tiket lain. Pengecekan via tautan universal **tidak membuktikan kepemilikan tiket fisik**. Panitia **wajib memverifikasi tiket fisik asli** sebelum menyerahkan hadiah.
+- **QR universal:** QR Code berisi satu tautan umum tanpa rahasia tiket individual (`?qr=...`). Peserta cukup memindai QR dan memasukkan token `2027NNN` dari tiket fisik. Rotasi tiga digit tetap mudah ditebak dan bukan pengamanan; siapa pun yang membuka tautan bisa mengetikkan token tiket lain. Pengecekan via tautan universal **tidak membuktikan kepemilikan tiket fisik**. Panitia **wajib memverifikasi tiket fisik asli** sebelum menyerahkan hadiah.
 - Format lama yang menyertakan QR rahasia (baik alias 16 karakter maupun 64 hex) tetap diterima backend bila klien lama mengirimkannya.
 - Google Sheets tetap bisa diubah manual oleh orang yang memiliki hak edit; batasi akses edit untuk panitia inti dan simpan salinan file EO final sebagai audit.
 - Web statis + Apps Script bergantung pada kuota layanan Google dan dukungan browser terhadap bridge iframe. Sesuai dokumentasi resmi Google, batas eksekusi bersamaan (*simultaneous executions*) adalah 30 per akun Google pengguna (1.000 per script); kuota 20.000/100.000 per hari adalah kuota URL Fetch keluar, bukan kuota Web App HTTP masuk. Jika lonjakan request melampaui batas bersamaan Google, server dapat menolak request sebelum kode script dieksekusi.

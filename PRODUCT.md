@@ -21,7 +21,7 @@ Tiket disiapkan sebelum acara, dibagikan saat registrasi, dan diperiksa melalui 
 ## Capabilities and Constraints
 
 - Jumlah tiket dikonfigurasi panitia saat DRAFT, sebelum tiket dibuat. Default 65 untuk kompatibilitas acara lama; rentang implementasi 8–999 mempertahankan nomor 3 digit. Jumlah terpilih mengikuti nilai TRUE dalam berkas hasil, dari 0 sampai seluruh tiket; tidak ada batas tetap 8.
-- Sesudah dibuat, jumlah dan data tiket terkunci. Nomor berurutan mulai 001; token tetap 2027XXX. CSV EO, statistik, ekspor JPG/ZIP, dan cetak mengikuti jumlah tersimpan.
+- Sesudah dibuat, jumlah dan data tiket terkunci. Nomor berurutan mulai 001; token baru memakai 2027 diikuti digit nomor urutan akhir, awal, tengah (014 menjadi 2027401). Token acara lama tetap dipertahankan tanpa alias otomatis. CSV EO, statistik, ekspor JPG/ZIP, dan cetak memakai pasangan nomor/token tersimpan.
 - Peserta, login, dan admin memakai light mode saja, tanpa mengikuti tema OS atau preferensi dark lama.
 - QR universal mengarahkan peserta ke tautan aplikasi, dan peserta memasukkan token pengecekan pada tiket fisik. Hasil CSV atau Excel (.xlsx, tab EO_Import) dibaca lokal di browser. Konfirmasi menunjukkan jumlah TRUE/FALSE dan memperingatkan bila tidak ada tiket terpilih. Hasil diimpor sekali per sesi, dikunci, dan tidak berubah ketika dipindai ulang.
 - Admin dapat melakukan reset sesi setelah konfirmasi: hapus hasil terpilih, waktu pengecekan, dan waktu penguncian; pertahankan jumlah, nomor, token, QR, pengaturan acara, serta riwayat audit. Reset kembali ke TICKETS_READY dan wajib diikuti impor hasil sebelum sesi dibuka kembali. Cache hasil dipisahkan per sesi.

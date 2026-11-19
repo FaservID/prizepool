@@ -1,7 +1,7 @@
 /**
  * NBSA Hidden Prize 2027 — backend Google Sheets.
  * H-1: atur jumlah dan cetak QR; hari H: bagikan tiket dan impor status keikutsertaan melalui CSV;
- * saat Hidden Prize: peserta scan QR dan masukkan token 2027 + nomor 3 digit.
+ * saat Hidden Prize: peserta scan QR dan masukkan token 2027 + digit nomor urutan akhir, awal, tengah.
  * Status keikutsertaan tidak pernah dimuat di frontend publik sebelum verifikasi. Satu spreadsheet per acara.
  */
 const PP = Object.freeze({
@@ -244,6 +244,16 @@ function adminStats_() {
   };
 }
 
+function buildCheckToken_(number) {
+  if (typeof number !== 'string' || !/^\d{3}$/.test(number) || Number(number) < 1) throw new Error('Nomor registrasi tidak valid.');
+  return PP.YEAR + number[2] + number[0] + number[1];
+}
+
+function isValidCheckToken_(number, token) {
+  // Tiket lama tetap memakai token tersimpan; verify tidak menerima alias format lain.
+  return token === buildCheckToken_(number) || token === PP.YEAR + number;
+}
+
 function generateTickets_(requestedCount) {
   if (getSetting_('STATUS') !== 'DRAFT') throw new Error('Tiket hanya bisa dibuat saat DRAFT.');
   if (getTicketRows_().length) throw new Error('Tiket sudah dibuat. Tidak dapat membuat ulang karena QR sudah dibagikan.');
@@ -255,7 +265,7 @@ function generateTickets_(requestedCount) {
     let token;
     do { token = randomToken_(); } while (seen.has(compactQrToken_(token)));
     seen.add(compactQrToken_(token));
-    rows.push([num, PP.YEAR + num, token, false, '']);
+    rows.push([num, buildCheckToken_(num), token, false, '']);
   }
   setSetting_('TICKET_COUNT', String(count));
   getSs_().getSheetByName(PP.TICKETS).getRange(2, 1, count, PP.HEADERS.length).setValues(rows);
@@ -270,7 +280,7 @@ function importResults_(items) {
   const rows = getTicketRows_();
   if (rows.length !== count) throw new Error('Database wajib berisi tepat ' + count + ' tiket.');
   if (!Array.isArray(items) || items.length !== count) throw new Error('Berkas hasil harus memiliki tepat ' + count + ' baris data.');
-  if (rows.some(row => !/^[a-f0-9]{64}$/.test(String(row[2])) || !!row[4])) {
+  if (new Set(rows.map(row => String(row[1]))).size !== count || rows.some(row => !/^[a-f0-9]{64}$/.test(String(row[2])) || !!row[4])) {
     throw new Error('Data tiket tidak valid atau sudah ada hasil scan.');
   }
   const byNumber = new Map(rows.map(row => [String(row[0]), row]));
@@ -281,7 +291,7 @@ function importResults_(items) {
     const checkToken = String(item.checkToken || '').trim();
     if (!/^\d{3}$/.test(number) || !byNumber.has(number)) throw new Error('Nomor registrasi tidak valid: ' + number);
     if (selectedByNumber.has(number)) throw new Error('Nomor registrasi duplikat: ' + number);
-    if (checkToken !== PP.YEAR + number || String(byNumber.get(number)[1]) !== checkToken) {
+    if (!isValidCheckToken_(number, checkToken) || String(byNumber.get(number)[1]) !== checkToken) {
       throw new Error('Token tidak cocok untuk nomor ' + number);
     }
     if (typeof item.selected !== 'boolean') throw new Error('Kolom terpilih untuk nomor ' + number + ' wajib TRUE/FALSE.');
@@ -323,9 +333,10 @@ function resetSession_() {
   if (sheet.getLastRow() !== count + 1 || rows.length !== count ||
       sheet.getRange(1, 1, 1, PP.HEADERS.length).getValues()[0].join('|') !== PP.HEADERS.join('|') ||
       new Set(rows.map(row => String(row[0]))).size !== count ||
+      new Set(rows.map(row => String(row[1]))).size !== count ||
       new Set(rows.map(row => String(row[2]))).size !== count ||
       rows.some(row => !/^\d{3}$/.test(String(row[0])) || Number(row[0]) < 1 || Number(row[0]) > count ||
-        String(row[1]) !== PP.YEAR + String(row[0]) || !/^[a-f0-9]{64}$/.test(String(row[2])))) {
+        !isValidCheckToken_(String(row[0]), String(row[1])) || !/^[a-f0-9]{64}$/.test(String(row[2])))) {
     throw new Error('Data tiket tidak valid. Reset dibatalkan tanpa mengubah tiket.');
   }
   setSetting_('STATUS', 'RESETTING');
