@@ -426,7 +426,35 @@ function AdminPage({ refreshPublicInfo }) {
           </div>
           <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
           <Notice type="error">{syncError}</Notice>
-          {lastSyncedAt && <p className="field-help">Data terakhir diterima: <time dateTime={lastSyncedAt.toISOString()}>{lastSyncedAt.toLocaleTimeString('id-ID', { hour12: false })}</time>. {busy ? 'Memuat data…' : 'Tombol Segarkan data mengambil ulang tabel dari Google Sheets.'}</p>}
+
+          {lastSyncedAt instanceof Date &&
+            !Number.isNaN(lastSyncedAt.getTime()) && (
+              <p
+                className="field-help"
+                style={{
+                  marginBottom: '1rem',
+                  fontWeight: 'bold'
+                }}
+              >
+                Data terakhir diterima:{' '}
+                <time dateTime={lastSyncedAt.toISOString()}>
+                  {lastSyncedAt.toLocaleString('id-ID', {
+                    timeZone: 'Asia/Jakarta',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                  })}
+                </time>
+                .{' '}
+                {busy
+                  ? 'Memuat data…'
+                  : 'Tombol Segarkan data mengambil ulang tabel dari Google Sheets.'}
+              </p>
+            )}
           <dl className="stats-grid" aria-label="Jumlah tiket">
             <div><dt>Tiket tersedia</dt><dd>{data?.total ?? 0}<span> / {ticketCount}</span></dd></div>
             <div><dt>Tiket terpilih</dt><dd>{data?.selected ?? 0}<span> / {ticketCount}</span></dd></div>
