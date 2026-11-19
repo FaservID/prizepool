@@ -62,7 +62,7 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!/^2027\d{3}$/.test(checkToken)) return setError('Masukkan 7 digit token pada tiket, misalnya 2027052.');
+    if (!/^2027\d{3}$/.test(checkToken)) return setError('Masukkan 7 digit token pengecekan sesuai arahan panitia.');
     setLoading(true);
     setError('');
     try {
@@ -92,7 +92,7 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
           {!result ? (
             <>
               <h2 id="ticket-title">Periksa tiket Hidden Prize</h2>
-              <p className="card-instruction">Masukkan token pada tiket untuk melihat status keikutsertaan Anda dalam Hidden Prize.</p>
+              <p className="card-instruction">Masukkan token pengecekan untuk melihat status keikutsertaan Anda dalam Hidden Prize.</p>
               {!isConfigured ? (
                 <Notice type="error">
                   <svg className="notice-icon" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="currentColor" /><path d="M12 6v7m0 3v2" stroke="white" strokeWidth="2" /></svg>
@@ -109,14 +109,14 @@ function ParticipantPage({ info, infoError, infoLoading, reloadInfo }) {
                 </div>
               )}
               <Notice type="error">{infoError}</Notice>
-              <p id="qr-context" className="qr-context">Masukkan 7 digit token pada tiket fisik Anda (contoh: 2027052).</p>
+              <p id="qr-context" className="qr-context">Masukkan token pengecekan sesuai arahan panitia saat sesi Hidden Prize berlangsung.</p>
               <form onSubmit={submit} className="participant-form" aria-busy={loading}>
                 <div className="form-group">
                   <label htmlFor="check-token">Token pengecekan</label>
                   <div className="token-field">
                     <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="8" cy="18" r="5.5" /><path d="m12 14 13-12m-5 5 5 5m-9-1 4 4" /></svg>
                     <input id="check-token" className="input-field token-input" type="text" inputMode="numeric" pattern="2027[0-9]{3}" maxLength={7} autoComplete="off" required
-                      aria-describedby="qr-context" value={checkToken} placeholder="Masukkan token pada tiket" onChange={e => setCheckToken(e.target.value.replace(/\D/g, '').slice(0, 7))} />
+                      aria-describedby="qr-context" value={checkToken} placeholder="Masukkan token pengecekan" onChange={e => setCheckToken(e.target.value.replace(/\D/g, '').slice(0, 7))} />
                   </div>
                 </div>
                 <button type="submit" className="btn btn-primary btn-full" disabled={loading || !isConfigured || info?.status !== 'LIVE'}>
@@ -467,7 +467,7 @@ function AdminPage({ refreshPublicInfo }) {
           </section>
           <section className="panel" aria-labelledby="tickets-title">
             <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket menggunakan nomor registrasi, tanpa mencatat nama karyawan.</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil' : 'Tampilkan hasil'}</button></div>
-            <div className="table-toolbar"><div className="search-field"><label htmlFor="ticket-search">Cari nomor atau token</label><input id="ticket-search" className="input-field" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="052 atau 2027052" /></div><p className="field-help" role="status">{filtered.length} dari {data?.tickets?.length || 0} tiket</p></div>
+            <div className="table-toolbar"><div className="search-field"><label htmlFor="ticket-search">Cari nomor atau token</label><input id="ticket-search" className="input-field" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="052 atau nomor token" /></div><p className="field-help" role="status">{filtered.length} dari {data?.tickets?.length || 0} tiket</p></div>
             <div className="table-scroll" role="region" aria-label="Daftar tiket peserta, geser untuk melihat seluruh kolom" tabIndex={0}>
               <table><caption className="sr-only">Nomor registrasi, token pengecekan, status pengecekan, dan status terpilih</caption><thead><tr><th scope="col">Nomor</th><th scope="col">Token</th><th scope="col">Pengecekan</th><th scope="col">Status terpilih</th><th scope="col">Unduh</th></tr></thead><tbody>
                 {filtered.map(ticket => <tr key={ticket.registrationNumber}><th scope="row">{ticket.registrationNumber}</th><td className="tabular">{ticket.checkToken}</td><td>{ticket.checkedAt ? 'Sudah diperiksa' : 'Belum diperiksa'}</td><td>{showResults && ['LOCKED', 'LIVE', 'CLOSED'].includes(data.status) ? ticket.eligible ? 'Terpilih (TRUE)' : 'Tidak terpilih (FALSE)' : 'Disembunyikan'}</td><td><button type="button" className="btn btn-outline row-download" disabled={exportDisabled} onClick={() => downloadSingleCardJpg(ticket)} aria-label={`Unduh JPG tiket ${ticket.registrationNumber}`}>{exporting === ticket.registrationNumber ? 'Membuat…' : 'JPG'}</button></td></tr>)}

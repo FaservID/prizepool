@@ -64,4 +64,5 @@ assert.match(css, /color-scheme:\s*light\s*;/);
 assert.doesNotMatch(app + css, /nb_theme|ThemeToggle|prefers-color-scheme|data-theme\s*=\s*["']dark/);
 assert.doesNotMatch(app + Object.values(STATUS_NAMES).join('\n'), /(?:hasil(?: pilihan)?|terpilih|CSV) EO\b|Yahh|berhak menerima Hidden Prize/i);
 assert.match(app, /berhak mengikuti Hidden Prize NBSA/);
+assert.doesNotMatch(app, /2027052/);
 console.log('PASS frontend: konfigurasi 8/65/100/999, CSV lengkap dengan 8 TRUE, validasi pasangan dan jumlah, default 65, source light-only, bahasa status keikutsertaan.');
