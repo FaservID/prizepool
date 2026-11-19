@@ -3,7 +3,8 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const io = { reads: [], events: [], failScanWrite: false, failAudit: false, failFlush: false };
+const io = { reads: [], events: [], failScanWrite: false, failAudit: false, failFlush: false,
+  failResetWrite: false, failResetAudit: false, afterRead: null, afterCachePut: null };
 const lock = { held: false, busy: false, beforeTry: null, waits: [] };
 const cache = new Map();
 let cacheClock = 0;
@@ -16,6 +17,9 @@ class Sheet {
       assert.ok(lock.held, 'First-scan audit stays inside lock');
       if (io.failAudit) { io.failAudit = false; throw new Error('Audit write failed'); }
     }
+    if (row[1] === 'RESET_SESSION' && io.failResetAudit) {
+      io.failResetAudit = false; throw new Error('Reset audit failed');
+    }
     this.rows.push([...row]);
   }
   getRange(r,c,n=1,m=1){
@@ -23,9 +27,20 @@ class Sheet {
     if(typeof r==='string')return {setNumberFormat:()=>{}};
     const read = () => io.reads.push({ sheet: this.name, r, c, n, m, locked: lock.held });
     return {
-      getValues:()=>{read();return Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>this.rows[r-1+i]?.[c-1+j]??''));},
+      getValues:()=>{
+        read();
+        const values = Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>this.rows[r-1+i]?.[c-1+j]??''));
+        const after = io.afterRead; io.afterRead = null; after?.(this.name);
+        return values;
+      },
       getValue:()=>{read();return this.rows[r-1]?.[c-1]??'';},
-      setValues:values=>{for(let i=0;i<n;i++){if(!this.rows[r-1+i])this.rows[r-1+i]=[];for(let j=0;j<m;j++)this.rows[r-1+i][c-1+j]=values[i][j];}},
+      setValues:values=>{
+        if (this.name === 'Participants' && c === 4 && m === 2) {
+          assert.ok(lock.held, 'Session reset stays inside admin lock');
+          if (io.failResetWrite) { io.failResetWrite = false; throw new Error('Reset write failed'); }
+        }
+        for(let i=0;i<n;i++){if(!this.rows[r-1+i])this.rows[r-1+i]=[];for(let j=0;j<m;j++)this.rows[r-1+i][c-1+j]=values[i][j];}
+      },
       setValue:value=>{
         if (this.name === 'Participants' && c === 5) {
           assert.ok(lock.held, 'First timestamp must be protected by lock');
@@ -59,6 +74,8 @@ const ctx=vm.createContext({
         assert.ok(Buffer.byteLength(value, 'utf8') <= 100 * 1024);
         assert.ok(seconds >= 1 && seconds <= 21600);
         cache.set(key,{value,expires:cacheClock+seconds*1000});
+        const after = io.afterCachePut;
+        if (after && !lock.held) { io.afterCachePut = null; after(key, value); }
       },
       remove:key=>cache.delete(key),
     };
@@ -119,8 +136,8 @@ ctx.verifyArgs={checkToken:'2027052'};
 assert.throws(()=>run('verifyTicket_(verifyArgs)'),/belum dibuka/);
 // Invalid EO entries must not modify saved status.
 const valid=initial.tickets.map((t,i)=>({registrationNumber:t.registrationNumber,checkToken:t.checkToken,selected:i<8}));
-ctx.invalidCount=valid.map((v,i)=>({...v,selected:i<7}));
-assert.throws(()=>run('importResults_(invalidCount)'),/tepat 8 TRUE/);
+ctx.invalidSelection=valid.map((v,i)=>({...v,selected:i === 0 ? 'TRUE' : v.selected}));
+assert.throws(()=>run('importResults_(invalidSelection)'),/wajib TRUE\/FALSE/);
 assert.equal(run('getSetting_("STATUS")'),'TICKETS_READY');
 ctx.invalidToken=valid.map(x=>({...x}));ctx.invalidToken[5].checkToken='2027999';
 assert.throws(()=>run('importResults_(invalidToken)'),/Token tidak cocok/);
@@ -205,7 +222,7 @@ for (const requestedCount of [8, '100', 999]) {
     registrationNumber: ticket.registrationNumber, checkToken: ticket.checkToken, selected: i < 8,
   }));
   assert.throws(() => admin('adminImportResults', { results: results.slice(0, -1) }), new RegExp(`tepat ${count} baris`));
-  assert.throws(() => admin('adminImportResults', { results: results.map((row, i) => ({ ...row, selected: i < 7 })) }), /8 TRUE/);
+  assert.throws(() => admin('adminImportResults', { results: results.map((row, i) => ({ ...row, selected: i === 0 ? null : row.selected })) }), /wajib TRUE\/FALSE/);
   assert.equal(snapshot(), before, 'Invalid imports must not change saved state');
   const payload = JSON.stringify({ action: 'adminImportResults', password: 'x'.repeat(200), results });
   assert.ok(payload.length < 80000, `${count} results must fit existing payload limit`);
@@ -245,6 +262,36 @@ for (const requestedCount of [8, '100', 999]) {
   before = snapshot();
   assert.throws(() => run('publicInfo_()'), /bilangan bulat 8–999/);
   assert.equal(snapshot(), before, 'Invalid stored count must fail, not silently fall back');
+}
+// Jumlah terpilih mengikuti berkas, termasuk nol dan seluruh tiket; status tetap terkunci.
+for (const selectedCount of [0, 1, 3, 7, 9, 65]) {
+  tabs.clear(); cache.clear();
+  run('setupProject()');
+  const generated = admin('adminGenerateTickets', { ticketCount: 65 });
+  const results = generated.tickets.map((ticket, i) => ({
+    registrationNumber: ticket.registrationNumber, checkToken: ticket.checkToken, selected: i < selectedCount,
+  }));
+  const imported = admin('adminImportResults', { results: [...results].reverse() });
+  assert.equal(imported.selected, selectedCount);
+  assert.equal(imported.maxWinners, 65);
+  assert.equal(imported.status, 'LOCKED');
+  assert.equal(tabs.get('Audit').rows.at(-1)[3], `65 status keikutsertaan dikunci: ${selectedCount} TRUE, ${65 - selectedCount} FALSE`);
+  const locked = snapshot();
+  assert.throws(() => admin('adminImportResults', { results }), /satu kali/);
+  assert.equal(snapshot(), locked);
+  const flags = tabs.get('Participants').rows.slice(1).map(row => row[3]);
+  tabs.get('Participants').rows[1][3] = 'TRUE';
+  const invalid = snapshot();
+  assert.throws(() => admin('adminGoLive'), /status TRUE\/FALSE/);
+  assert.equal(snapshot(), invalid, 'Non-boolean stored status must fail without changing lifecycle');
+  tabs.get('Participants').rows[1][3] = flags[0];
+  admin('adminGoLive');
+  ctx.dynamicVerify = { checkToken: generated.tickets[0].checkToken };
+  assert.equal(run('verifyTicket_(dynamicVerify)').eligible, selectedCount > 0);
+  assert.equal(run('verifyTicket_(dynamicVerify)').alreadyChecked, true);
+  admin('adminClose');
+  assert.deepEqual(tabs.get('Participants').rows.slice(1).map(row => row[3]), flags, 'Verify and close must preserve imported selections');
+  assert.throws(() => run('verifyTicket_(dynamicVerify)'), /ditutup/);
 }
 // Batas POST tetap ditolak sebelum aksi dijalankan.
 ctx.oversizedRequest = { parameter: { ...request.parameter, payload: ' '.repeat(80001) } };
@@ -316,8 +363,8 @@ const firstTimestamp = tabs.get('Participants').rows[1][4].toISOString();
 const scan2 = run('verifyTicket_(testTicket)');
 assert.equal(scan2.alreadyChecked, true);
 assert.equal(scan2.eligible, true);
-assert.equal(io.reads.length, 1);
-assert.equal(io.reads[0].sheet, 'Settings');
+assert.equal(io.reads.length, 2);
+assert.ok(io.reads.every(read => read.sheet === 'Settings'), 'Cache hit rechecks session without reading Participants');
 assert.equal(lock.waits.length, waitsBefore);
 assert.deepEqual(io.events, []);
 assert.equal(tabs.get('Participants').rows[1][4].toISOString(), firstTimestamp);
@@ -403,4 +450,126 @@ assert.throws(() => run('verifyTicket_(failFlushTicket)'), /Flush failed/);
 assert.equal(lock.held, false, 'Lock must be released when flush throws');
 assert.equal(cache.has('checked:SHEET_TEST:2027006:' + failFlushSecret), false);
 
-console.log('PASS backend: default/legacy 65, konfigurasi 8/100/999, count dan QR terkunci, payload, validasi nonmutasi, EO 8 TRUE, scan ulang, auth, LIVE/CLOSED, konkurensi short-lock, BUSY retryable, caching.');
+// --- RESET SESI: tiket tetap, hasil dan timestamp mulai ulang ---
+function sessionFixture(count = 8) {
+  tabs.clear(); cache.clear();
+  run('setupProject()');
+  const generated = admin('adminGenerateTickets', { ticketCount: count });
+  const results = generated.tickets.map((ticket, i) => ({
+    registrationNumber: ticket.registrationNumber, checkToken: ticket.checkToken, selected: i < 3,
+  }));
+  admin('adminImportResults', { results });
+  admin('adminGoLive');
+  return { generated, results };
+}
+const ticketIdentity = () => JSON.stringify(tabs.get('Participants').rows.map(row => row.slice(0, 3)));
+const resetStates = ['TICKETS_READY', 'IMPORTING', 'RESETTING', 'LOCKED', 'LIVE', 'CLOSED'];
+for (const [i, status] of resetStates.entries()) {
+  const count = [8, 65, 100, 999, 8, 65][i];
+  const { generated, results } = sessionFixture(count);
+  ctx.resetVerify = { checkToken: generated.tickets[0].checkToken };
+  run('verifyTicket_(resetVerify)');
+  tabs.get('Participants').rows[1][4] = new Date('2000-01-01T00:00:00Z');
+  run(`setSetting_('STATUS', '${status}')`);
+  if (i === 1) tabs.get('Settings').rows = tabs.get('Settings').rows.filter(row => row[0] !== 'TICKET_COUNT');
+  const identity = ticketIdentity();
+  const properties = JSON.stringify([...props]);
+  const auditBefore = JSON.stringify(tabs.get('Audit').rows);
+  const auditLength = tabs.get('Audit').rows.length;
+  const reset = admin('adminResetSession');
+  assert.equal(reset.status, 'TICKETS_READY');
+  assert.equal(reset.total, count);
+  assert.equal(reset.maxParticipants, count);
+  assert.equal(reset.selected, 0);
+  assert.equal(reset.checked, 0);
+  assert.equal(reset.lockedAt, '');
+  assert.ok(reset.tickets.every(ticket => !ticket.eligible && ticket.checkedAt === ''));
+  assert.equal(ticketIdentity(), identity, `${status}: reset must preserve numbers, check tokens and QR secrets`);
+  assert.equal(JSON.stringify([...props]), properties, 'Password, origins and spreadsheet configuration stay unchanged');
+  assert.equal(JSON.stringify(tabs.get('Audit').rows.slice(0, auditLength)), auditBefore);
+  assert.equal(tabs.get('Audit').rows.at(-1)[1], 'RESET_SESSION');
+  assert.match(tabs.get('Audit').rows.at(-1)[3], /3 status terpilih dan 1 waktu pengecekan dihapus/);
+  assert.ok(run('getSetting_("SESSION_ID")'));
+  assert.equal(run('publicInfo_().checked'), 0);
+  assert.throws(() => run('verifyTicket_(resetVerify)'), /belum dibuka/);
+  assert.throws(() => admin('adminGoLive'), /Status harus LOCKED/);
+  assert.throws(() => admin('adminGenerateTickets'), /DRAFT/);
+  admin('adminImportResults', { results: results.map(row => ({ ...row, selected: !row.selected })) });
+  assert.equal(admin('adminStats').selected, count - 3);
+  admin('adminGoLive');
+  assert.equal(run('verifyTicket_(resetVerify)').eligible, false, 'Old eligible cache must not survive reset');
+  assert.equal(run('verifyTicket_(resetVerify)').alreadyChecked, true);
+  const timestamp = tabs.get('Participants').rows[1][4].toISOString();
+  assert.notEqual(timestamp, '2000-01-01T00:00:00.000Z');
+  ctx.resetVerify.token = shortToken(generated.tickets[0].token);
+  assert.equal(run('verifyTicket_(resetVerify)').eligible, false, 'Previously printed legacy QR still matches');
+  assert.equal(tabs.get('Participants').rows[1][4].toISOString(), timestamp);
+}
+
+// Reset kedua juga mengganti namespace cache; cache rusak bukan sumber kebenaran.
+const previousSession = run('getSetting_("SESSION_ID")');
+cacheBroken = true;
+assert.equal(admin('adminResetSession').status, 'TICKETS_READY');
+assert.notEqual(run('getSetting_("SESSION_ID")'), previousSession);
+cacheBroken = false;
+
+// Auth dan validasi gagal sebelum ada perubahan data.
+const beforeUnauthorizedReset = snapshot();
+assert.throws(() => admin('adminResetSession', { password: 'wrong' }), /Password admin salah/);
+assert.equal(snapshot(), beforeUnauthorizedReset);
+for (const corrupt of [
+  () => { tabs.get('Participants').rows.pop(); },
+  () => { tabs.get('Participants').rows[1][0] = '000'; },
+  () => { tabs.get('Participants').rows[2][0] = '001'; },
+  () => { tabs.get('Participants').rows[1][1] = '2027999'; },
+  () => { tabs.get('Participants').rows[1][2] = 'invalid'; },
+  () => { tabs.get('Participants').rows[2][2] = tabs.get('Participants').rows[1][2]; },
+  () => { tabs.get('Participants').rows[0][3] = 'wrong_header'; },
+]) {
+  sessionFixture(); corrupt();
+  const before = snapshot();
+  assert.throws(() => admin('adminResetSession'), /Data tiket tidak valid/);
+  assert.equal(snapshot(), before, 'Invalid database must not be modified by reset');
+  assert.equal(lock.held, false);
+}
+tabs.clear(); cache.clear(); run('setupProject()');
+const draft = snapshot();
+assert.throws(() => admin('adminResetSession'), /setelah tiket dibuat/);
+assert.equal(snapshot(), draft);
+
+// Gagal di tengah reset tetap menutup verifikasi/impor; admin bisa ulangi reset.
+for (const [failure, message] of [['failResetWrite', /Reset write failed/], ['failResetAudit', /Reset audit failed/], ['failFlush', /Flush failed/]]) {
+  const { results } = sessionFixture();
+  const identity = ticketIdentity();
+  io[failure] = true;
+  assert.throws(() => admin('adminResetSession'), message);
+  assert.equal(lock.held, false);
+  assert.equal(ticketIdentity(), identity);
+  assert.equal(run('getSetting_("STATUS")'), 'RESETTING');
+  assert.throws(() => admin('adminGoLive'), /Status harus LOCKED/);
+  assert.throws(() => admin('adminImportResults', { results }), /satu kali/);
+  assert.throws(() => run('verifyTicket_({ checkToken: "2027001" })'), /ditutup/);
+  assert.equal(admin('adminResetSession').status, 'TICKETS_READY');
+}
+
+// Request lama tidak boleh menulis timestamp atau menampilkan hasil sesi baru.
+for (const point of ['before-lock', 'cached-result', 'after-lock']) {
+  const { results } = sessionFixture();
+  if (point === 'cached-result') run('verifyTicket_({ checkToken: "2027001" })');
+  const replaceSession = () => {
+    admin('adminResetSession');
+    admin('adminImportResults', { results: results.map(row => ({ ...row, selected: false })) });
+    admin('adminGoLive');
+  };
+  if (point === 'before-lock') lock.beforeTry = replaceSession;
+  if (point === 'cached-result') io.afterRead = name => { assert.equal(name, 'Settings'); replaceSession(); };
+  if (point === 'after-lock') io.afterCachePut = key => { assert.match(key, /^checked:/); replaceSession(); };
+  assert.throws(() => run('verifyTicket_({ checkToken: "2027001" })'), /Sesi telah direset/);
+  assert.equal(tabs.get('Participants').rows[1][4], '', `${point}: old request must not check ticket in new session`);
+  const fresh = run('verifyTicket_({ checkToken: "2027001" })');
+  assert.equal(fresh.eligible, false);
+  assert.equal(fresh.alreadyChecked, false, `${point}: old cache must not mark new session as checked`);
+  assert.equal(lock.held, false);
+}
+
+console.log('PASS backend: jumlah tiket/terpilih dinamis, CSV boolean, auth, LIVE/CLOSED, short-lock/BUSY, caching, reset 8/65/100/999 tanpa mengganti tiket, pemulihan reset gagal, isolasi cache dan request lintas sesi.');

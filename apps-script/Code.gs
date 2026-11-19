@@ -6,7 +6,6 @@
  */
 const PP = Object.freeze({
   DEFAULT_COUNT: 65,
-  WINNERS: 8,
   YEAR: '2027',
   TICKETS: 'Participants', // sengaja memakai nama tab lama supaya migrasi lebih aman
   SETTINGS: 'Settings',
@@ -47,8 +46,9 @@ function setupProject() {
   tickets.setFrozenRows(1); settings.setFrozenRows(1); audit.setFrozenRows(1);
   tickets.getRange('A:C').setNumberFormat('@');
   PropertiesService.getScriptProperties().setProperty('SHEET_ID', ss.getId());
-  removeCache_('public:' + ss.getId());
-  removeCache_('tickets:' + ss.getId());
+  const session = getSession_();
+  removeCache_('public:' + session.cacheScope + ':' + session.status);
+  removeCache_('tickets:' + session.cacheScope);
   ss.toast('Database Hidden Prize 2027 siap. Atur password dan domain dari menu 🎁 Hidden Prize.');
 }
 
@@ -127,13 +127,14 @@ function dispatch_(p) {
   if (action === 'adminImportResults') return withLock_(() => importResults_(p.results));
   if (action === 'adminGoLive') return withLock_(() => changeStatus_('LOCKED', 'LIVE'));
   if (action === 'adminClose') return withLock_(() => changeStatus_('LIVE', 'CLOSED'));
+  if (action === 'adminResetSession') return withLock_(() => resetSession_());
   throw new Error('Aksi tidak dikenal.');
 }
 
 function validateTicketCount_(value) {
   const count = typeof value === 'number' ? value
     : typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : NaN;
-  if (!Number.isInteger(count) || count < PP.WINNERS || count > 999) throw new Error('Jumlah tiket harus bilangan bulat 8–999.');
+  if (!Number.isInteger(count) || count < 8 || count > 999) throw new Error('Jumlah tiket harus bilangan bulat 8–999.');
   return count;
 }
 
@@ -142,19 +143,20 @@ function getTicketCount_() {
   return value === '' ? PP.DEFAULT_COUNT : validateTicketCount_(value);
 }
 
-function publicInfo_(ticketRows) {
-  const cacheKey = 'public:' + PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+function publicInfo_(ticketRows, session = getSession_()) {
+  const cacheKey = 'public:' + session.cacheScope + ':' + session.status;
   if (!ticketRows) {
     const cached = readCache_(cacheKey);
     if (cached) return cached;
   }
   const rows = ticketRows || getTicketRows_();
+  const count = getTicketCount_();
   const info = {
     title: getSetting_('EVENT_TITLE') || 'NBSA Hidden Prize 2027',
-    status: getSetting_('STATUS') || 'DRAFT',
+    status: session.status || 'DRAFT',
     total: rows.length,
-    maxParticipants: getTicketCount_(),
-    maxWinners: PP.WINNERS,
+    maxParticipants: count,
+    maxWinners: count,
     checked: rows.filter(r => !!r[4]).length,
   };
   writeCache_(cacheKey, info, 5);
@@ -170,10 +172,9 @@ function verifyTicket_(p) {
   if (!/^2027\d{3}$/.test(checkToken) || (hasQr && !(legacyQr || /^[A-Za-z0-9_-]{16}$/.test(qrToken)))) {
     throw new Error('Token pengecekan atau QR Code tidak valid.');
   }
-  // Status otoritatif tidak di-cache: CLOSED tetap menolak meski hasil tiket ada di cache.
-  if (getSetting_('STATUS') !== 'LIVE') throw new Error('Sesi pengecekan Hidden Prize belum dibuka atau sudah ditutup.');
-  const sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
-  const ticketsKey = 'tickets:' + sheetId;
+  // Status dan ID sesi dibaca bersama; cache sesi lama tidak dipakai setelah reset.
+  const session = requireLiveSession_();
+  const ticketsKey = 'tickets:' + session.cacheScope;
   let rows = readCache_(ticketsKey);
   if (!rows) {
     const sheet = getSs_().getSheetByName(PP.TICKETS);
@@ -186,9 +187,12 @@ function verifyTicket_(p) {
     ? String(row[2]).toLowerCase() === qrToken.toLowerCase()
     : compactQrToken_(String(row[2])) === qrToken));
   const idx = rows.findIndex(matches);
-  const checkedKey = idx < 0 ? '' : 'checked:' + sheetId + ':' + checkToken + ':' + rows[idx][2];
+  const checkedKey = idx < 0 ? '' : 'checked:' + session.cacheScope + ':' + checkToken + ':' + rows[idx][2];
   const cached = checkedKey && readCache_(checkedKey);
-  if (cached) return { ...cached, alreadyChecked: true };
+  if (cached) {
+    requireLiveSession_(session.id);
+    return { ...cached, alreadyChecked: true };
+  }
 
   if (idx < 0) {
     appendAudit_('INVALID_CHECK', '', 'Token pengecekan atau QR lama tidak cocok');
@@ -198,7 +202,7 @@ function verifyTicket_(p) {
   // ponytail: scan pertama tetap serial; jika uji beban gagal, perlu backend transaksional.
   const result = withLock_(() => {
     // Timestamp pertama hanya dibaca di dalam lock, bukan dari snapshot sebelum lock.
-    if (getSetting_('STATUS') !== 'LIVE') throw new Error('Sesi pengecekan Hidden Prize belum dibuka atau sudah ditutup.');
+    requireLiveSession_(session.id);
     const row = sheet.getRange(idx + 2, 1, 1, PP.HEADERS.length).getValues()[0];
     if (!matches(row)) {
       removeCache_(ticketsKey);
@@ -218,13 +222,15 @@ function verifyTicket_(p) {
     };
   }, 100);
   writeCache_(checkedKey, result, 300);
+  requireLiveSession_(session.id);
   return result;
 }
 
 function adminStats_() {
+  const session = getSession_();
   const rows = getTicketRows_();
   return {
-    ...publicInfo_(rows),
+    ...publicInfo_(rows, session),
     lockedAt: getSetting_('LOCKED_AT') || '',
     selected: rows.filter(r => r[3] === true).length,
     tickets: rows.map(row => ({
@@ -280,14 +286,13 @@ function importResults_(items) {
   }
   if (selectedByNumber.size !== count) throw new Error('Nomor registrasi wajib lengkap.');
   const selectedCount = Array.from(selectedByNumber.values()).filter(Boolean).length;
-  if (selectedCount !== PP.WINNERS) throw new Error('Kolom terpilih harus berisi tepat 8 TRUE dan ' + (count - PP.WINNERS) + ' FALSE. Saat ini terbaca ' + selectedCount + ' TRUE.');
   // Seluruh validasi dilakukan sebelum perubahan state. Tidak ada undian otomatis.
   setSetting_('STATUS', 'IMPORTING');
   const flags = rows.map(row => [selectedByNumber.get(String(row[0]))]);
   getSs_().getSheetByName(PP.TICKETS).getRange(2, 4, count, 1).setValues(flags);
   setSetting_('LOCKED_AT', new Date().toISOString());
   setSetting_('STATUS', 'LOCKED');
-  appendAudit_('IMPORT_EO_LOCKED', '', count + ' status keikutsertaan dikunci: 8 TRUE, ' + (count - PP.WINNERS) + ' FALSE');
+  appendAudit_('IMPORT_EO_LOCKED', '', count + ' status keikutsertaan dikunci: ' + selectedCount + ' TRUE, ' + (count - selectedCount) + ' FALSE');
   return adminStats_();
 }
 
@@ -295,12 +300,41 @@ function changeStatus_(expected, next) {
   if (getSetting_('STATUS') !== expected) throw new Error('Status harus ' + expected + ' untuk melanjutkan.');
   const count = getTicketCount_();
   const rows = getTicketRows_();
-  if (rows.length !== count || rows.filter(r => r[3] === true).length !== PP.WINNERS) {
-    throw new Error('Validasi ' + count + ' tiket dan 8 TRUE gagal.');
+  if (rows.length !== count || rows.some(r => typeof r[3] !== 'boolean')) {
+    throw new Error('Validasi ' + count + ' tiket dan status TRUE/FALSE gagal.');
   }
   setSetting_('STATUS', next);
-  if (next === 'LIVE') writeCache_('tickets:' + PropertiesService.getScriptProperties().getProperty('SHEET_ID'), rows.map(row => row.slice(0, 4)), 300);
+  if (next === 'LIVE') writeCache_('tickets:' + getSession_().cacheScope, rows.map(row => row.slice(0, 4)), 300);
   appendAudit_('STATUS', '', expected + ' → ' + next);
+  return adminStats_();
+}
+
+function resetSession_() {
+  const previous = getSetting_('STATUS');
+  if (!['TICKETS_READY', 'IMPORTING', 'RESETTING', 'LOCKED', 'LIVE', 'CLOSED'].includes(previous)) {
+    throw new Error('Reset sesi hanya tersedia setelah tiket dibuat.');
+  }
+  const count = getTicketCount_();
+  const sheet = getSs_().getSheetByName(PP.TICKETS);
+  const rows = getTicketRows_();
+  if (sheet.getLastRow() !== count + 1 || rows.length !== count ||
+      sheet.getRange(1, 1, 1, PP.HEADERS.length).getValues()[0].join('|') !== PP.HEADERS.join('|') ||
+      new Set(rows.map(row => String(row[0]))).size !== count ||
+      new Set(rows.map(row => String(row[2]))).size !== count ||
+      rows.some(row => !/^\d{3}$/.test(String(row[0])) || Number(row[0]) < 1 || Number(row[0]) > count ||
+        String(row[1]) !== PP.YEAR + String(row[0]) || !/^[a-f0-9]{64}$/.test(String(row[2])))) {
+    throw new Error('Data tiket tidak valid. Reset dibatalkan tanpa mengubah tiket.');
+  }
+  setSetting_('STATUS', 'RESETTING');
+  // ID baru mengisolasi cache, termasuk cache yang ditulis request lama sesudah reset.
+  setSetting_('SESSION_ID', Utilities.getUuid());
+  SpreadsheetApp.flush();
+  sheet.getRange(2, 4, count, 2).setValues(rows.map(() => [false, '']));
+  setSetting_('LOCKED_AT', '');
+  appendAudit_('RESET_SESSION', '', previous + '; ' + count + ' tiket dipertahankan; ' +
+    rows.filter(row => row[3] === true).length + ' status terpilih dan ' + rows.filter(row => !!row[4]).length + ' waktu pengecekan dihapus');
+  SpreadsheetApp.flush();
+  setSetting_('STATUS', 'TICKETS_READY');
   return adminStats_();
 }
 
@@ -381,6 +415,20 @@ function getTicketRows_() {
   const last = sh.getLastRow();
   return last <= 1 ? [] : sh.getRange(2, 1, last - 1, PP.HEADERS.length).getValues().filter(r => String(r[0]).trim());
 }
+function getSession_() {
+  const sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  const sh = getSs_().getSheetByName(PP.SETTINGS);
+  const rows = sh && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues() : [];
+  const id = String(rows.find(row => String(row[0]) === 'SESSION_ID')?.[1] || '');
+  return { id, status: String(rows.find(row => String(row[0]) === 'STATUS')?.[1] || ''),
+    cacheScope: sheetId + (id ? ':' + id : '') };
+}
+function requireLiveSession_(expectedId) {
+  const session = getSession_();
+  if (session.status !== 'LIVE') throw new Error('Sesi pengecekan Hidden Prize belum dibuka atau sudah ditutup.');
+  if (expectedId !== undefined && session.id !== expectedId) throw new Error('Sesi telah direset. Perbarui status sesi sebelum memeriksa tiket kembali.');
+  return session;
+}
 function getSetting_(key) {
   const sh = getSs_().getSheetByName(PP.SETTINGS);
   if (!sh || sh.getLastRow() <= 1) return '';
@@ -389,9 +437,9 @@ function getSetting_(key) {
   return item ? String(item[1]) : '';
 }
 function setSetting_(key, value) {
-  const sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
-  removeCache_('public:' + sheetId);
-  if (key === 'STATUS') removeCache_('tickets:' + sheetId);
+  const session = getSession_();
+  removeCache_('public:' + session.cacheScope + ':' + session.status);
+  if (key === 'STATUS' || key === 'SESSION_ID') removeCache_('tickets:' + session.cacheScope);
   const sh = getSs_().getSheetByName(PP.SETTINGS);
   if (sh.getLastRow() > 1) {
     const keys = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();

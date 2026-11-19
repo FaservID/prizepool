@@ -9,7 +9,7 @@ import {
   downloadText,
   formatDatetime,
   generateQrCanvas,
-  parseEoCsv,
+  parseEoFile,
   renderTicketCardToCanvas,
   validateTicketCount,
   validateTicketSet,
@@ -264,7 +264,7 @@ function AdminPage({ refreshPublicInfo }) {
   function downloadTemplate() {
     try {
       downloadText('template_hasil_prizepool_2027.csv', buildEoCsv(data?.tickets, ticketCount));
-      setSuccess(`Format CSV disiapkan untuk ${data?.tickets?.length || ticketCount} tiket. Isi kolom terpilih dengan tepat 8 TRUE, sisanya FALSE.`);
+      setSuccess(`Format CSV disiapkan untuk ${data?.tickets?.length || ticketCount} tiket. Isi TRUE untuk tiket terpilih dan FALSE untuk lainnya. Jumlah terpilih mengikuti berkas.`);
       setError('');
     } catch (err) { setError(err.message); }
   }
@@ -275,13 +275,16 @@ function AdminPage({ refreshPublicInfo }) {
     if (!file) return;
     setError('');
     setSuccess('');
+    setBusy(true);
     try {
-      if (file.size > 2 * 1024 * 1024) throw new Error(`CSV terlalu besar. Batas 2 MB untuk ${ticketCount} baris tiket.`);
-      const rows = parseEoCsv(await file.text(), ticketCount);
-      if (!window.confirm(`Berkas CSV valid: tepat 8 tiket terpilih (TRUE) dari ${ticketCount} tiket. Impor dan kunci status keikutsertaan secara permanen? Tindakan ini tidak dapat diulang.`)) return;
+      const rows = await parseEoFile(file, ticketCount);
+      const selected = rows.filter(row => row.selected).length;
+      const warning = selected === 0 ? 'Tidak ada tiket terpilih. Pastikan berkas yang diunggah sudah benar.\n\n' : '';
+      if (!window.confirm(`${warning}Berkas valid: ${selected} tiket terpilih (TRUE) dan ${ticketCount - selected} tidak terpilih (FALSE). Impor dan kunci hasil untuk sesi ini? Perubahan hasil hanya dapat dilakukan setelah reset sesi yang menghapus seluruh hasil dan waktu pengecekan.`)) return;
       await send('adminImportResults', { results: rows });
-      setSuccess('Status keikutsertaan berhasil dikunci. Sesi pengecekan belum dibuka.');
-    } catch (err) { setError(err.message || 'CSV gagal diimpor. Periksa isi berkas.'); }
+      setSuccess(`${selected} tiket terpilih. Status keikutsertaan berhasil dikunci. Sesi pengecekan belum dibuka.`);
+    } catch (err) { setError(err.message || 'Berkas gagal diimpor. Periksa isi berkas.'); }
+    finally { setBusy(false); }
   }
 
   async function handleLogoUpload(event) {
@@ -402,7 +405,7 @@ function AdminPage({ refreshPublicInfo }) {
           <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
           <dl className="stats-grid" aria-label="Jumlah tiket">
             <div><dt>Tiket tersedia</dt><dd>{data?.total ?? 0}<span> / {ticketCount}</span></dd></div>
-            <div><dt>Tiket terpilih</dt><dd>{data?.selected ?? 0}<span> / 8</span></dd></div>
+            <div><dt>Tiket terpilih</dt><dd>{data?.selected ?? 0}<span> / {ticketCount}</span></dd></div>
             <div><dt>Sudah diperiksa</dt><dd>{data?.checked ?? 0}<span> / {ticketCount}</span></dd></div>
           </dl>
           <section className="panel" aria-labelledby="studio-title">
@@ -443,7 +446,7 @@ function AdminPage({ refreshPublicInfo }) {
             </div>
           </section>
           <section className="panel" aria-labelledby="flow-title">
-            <div className="section-heading"><h2 id="flow-title">Pengaturan sesi</h2><p>Status keikutsertaan diimpor satu kali dan tidak dapat diubah. Panitia mengatur pembukaan dan penutupan sesi.</p></div>
+            <div className="section-heading"><h2 id="flow-title">Pengaturan sesi</h2><p>Hasil dikunci selama sesi. Untuk mengimpor hasil baru, reset sesi terlebih dahulu. Nomor tiket dan QR tetap sama.</p></div>
             {data?.status !== 'DRAFT' && <p className="field-help">Jumlah terkunci: {ticketCount} tiket. Nomor 001–{lastNumber}, token 2027001–2027{lastNumber}.</p>}
             <div className="session-actions">
               {data?.status === 'DRAFT' && <div>
@@ -452,17 +455,23 @@ function AdminPage({ refreshPublicInfo }) {
                   <div className="form-group">
                     <label htmlFor="ticket-count">Jumlah tiket</label>
                     <input id="ticket-count" className="input-field" type="number" min="8" max="999" step="1" required value={ticketCountInput} onChange={e => setTicketCountInput(e.target.value)} disabled={sessionDisabled} aria-describedby="ticket-count-help" />
-                    <p id="ticket-count-help" className="field-help">8–999 tiket dengan nomor 3 digit. Berkas hasil wajib memuat tepat 8 tiket terpilih (TRUE). Jumlah dan data tiket tidak dapat diubah setelah dibuat.</p>
+                    <p id="ticket-count-help" className="field-help">8–999 tiket dengan nomor 3 digit. Jumlah tiket terpilih mengikuti berkas hasil. Jumlah dan data tiket tidak dapat diubah setelah dibuat.</p>
                   </div>
                   <button type="submit" className="btn btn-primary" disabled={sessionDisabled}>{busy ? 'Menyiapkan…' : 'Buat tiket'}</button>
                 </form>
               </div>}
-              {ticketsReady && <div><h3>Format hasil</h3><p>Isi kolom terpilih dengan tepat 8 TRUE dari {ticketCount} baris, sisanya FALSE. Simpan berkas akhir dalam format CSV.</p><div className="button-row"><button type="button" className="btn btn-outline" disabled={sessionDisabled} onClick={downloadTemplate}>Unduh format CSV</button>{ticketCount === 65 && <a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh format Excel (65 tiket)</a>}</div></div>}
-              {data?.status === 'TICKETS_READY' && <div><h3>Impor dan kunci data</h3><p>Periksa kembali data sebelum diimpor. Status yang telah dikunci tidak dapat diubah kembali.</p><label htmlFor="eo-csv">Unggah berkas CSV</label><input id="eo-csv" className="file-input" type="file" accept=".csv,text/csv" disabled={busy || !!exporting} onChange={importEo} /></div>}
-              {data?.status === 'IMPORTING' && <div><h3>Impor sedang diproses</h3><p>Tunggu hingga selesai, lalu segarkan data. Jangan mengimpor ulang.</p></div>}
-              {data?.status === 'LOCKED' && <div><h3>Buka pengecekan peserta</h3><p>8 tiket terpilih sudah dikunci. Buka sesi setelah pengumuman dimulai.</p><button type="button" className="btn btn-primary" disabled={busy || !!exporting} onClick={() => execute('adminGoLive', 'Buka pengecekan hasil untuk seluruh peserta sekarang?', 'Sesi dibuka. Peserta dapat memeriksa tiket.')}>Buka sesi pengecekan</button></div>}
-              {data?.status === 'LIVE' && <div><h3>Tutup sesi</h3><p>Peserta tidak dapat memeriksa tiket setelah sesi ditutup. Sesi tidak bisa dibuka kembali.</p><button type="button" className="btn btn-danger" disabled={busy || !!exporting} onClick={() => execute('adminClose', 'Tutup sesi pengecekan? Sesi tidak dapat dibuka kembali.', 'Sesi pengecekan ditutup.')}>Tutup sesi pengecekan</button></div>}
+              {ticketsReady && <div><h3>Format hasil</h3><p>Isi kolom terpilih dengan TRUE untuk tiket terpilih dan FALSE untuk lainnya pada seluruh {ticketCount} baris. Jumlah terpilih mengikuti berkas. Unggah CSV atau Excel (.xlsx); untuk Excel, isi tab EO_Import.</p><div className="button-row"><button type="button" className="btn btn-outline" disabled={sessionDisabled} onClick={downloadTemplate}>Unduh format CSV</button>{ticketCount === 65 && <a className="btn btn-outline" href={`${import.meta.env.BASE_URL}Template_EO_PrizePool_2027.xlsx`} download>Unduh format Excel (65 tiket)</a>}</div></div>}
+              {data?.status === 'TICKETS_READY' && <div><h3>Impor dan kunci data</h3><p>Periksa kembali data sebelum diimpor. Hasil terkunci sampai panitia melakukan reset sesi.</p><label htmlFor="eo-csv">Unggah berkas CSV atau Excel</label><input id="eo-csv" className="file-input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby="results-file-help" disabled={busy || !!exporting} onChange={importEo} /><p id="results-file-help" className="field-help">Maksimal 2 MB. Periksa jumlah terpilih pada konfirmasi sebelum mengunci hasil.</p></div>}
+              {data?.status === 'IMPORTING' && <div><h3>Impor sedang diproses</h3><p>Tunggu hingga selesai, lalu segarkan data. Jika status tetap sama, reset sesi sebelum mengimpor ulang.</p></div>}
+              {data?.status === 'RESETTING' && <div><h3>Reset belum selesai</h3><p>Pengecekan peserta dan impor hasil dinonaktifkan. Segarkan data. Jika status tetap sama, ulangi reset sesi.</p></div>}
+              {data?.status === 'LOCKED' && <div><h3>Buka pengecekan peserta</h3><p>{data.selected} tiket terpilih sudah dikunci. Buka sesi setelah pengumuman dimulai.</p><button type="button" className="btn btn-primary" disabled={busy || !!exporting} onClick={() => execute('adminGoLive', 'Buka pengecekan hasil untuk seluruh peserta sekarang?', 'Sesi dibuka. Peserta dapat memeriksa tiket.')}>Buka sesi pengecekan</button></div>}
+              {data?.status === 'LIVE' && <div><h3>Tutup sesi</h3><p>Peserta tidak dapat memeriksa tiket setelah sesi ditutup. Untuk memulai sesi baru, reset dan impor ulang hasil.</p><button type="button" className="btn btn-danger" disabled={busy || !!exporting} onClick={() => execute('adminClose', 'Tutup sesi pengecekan? Hasil dan waktu pengecekan tetap tersimpan. Sesi baru memerlukan reset dan impor ulang hasil.', 'Sesi pengecekan ditutup.')}>Tutup sesi pengecekan</button></div>}
               {data?.status === 'CLOSED' && <div><h3>Sesi selesai</h3><p>Sesi pengecekan telah ditutup. Data tiket dan status keikutsertaan tetap tersimpan.</p></div>}
+              {ticketsReady && ['TICKETS_READY', 'IMPORTING', 'RESETTING', 'LOCKED', 'LIVE', 'CLOSED'].includes(data?.status) && <div>
+                <h3>Reset sesi</h3>
+                <p id="reset-session-help">Hapus seluruh hasil terpilih dan waktu pengecekan. Nomor, token, jumlah tiket, dan QR tetap sama. Setelah reset, impor hasil baru sebelum membuka pengecekan. Riwayat audit tetap tersimpan.</p>
+                <button type="button" className="btn btn-danger" disabled={sessionDisabled} aria-describedby="reset-session-help" onClick={() => execute('adminResetSession', 'Reset sesi sekarang? Pengecekan peserta akan ditutup. Seluruh hasil terpilih dan waktu pengecekan akan dihapus dan tidak dapat dipulihkan melalui aplikasi. Nomor, token, jumlah tiket, dan QR tetap sama; riwayat audit dipertahankan. Anda harus mengimpor hasil baru sebelum membuka sesi kembali.', 'Sesi direset. Tiket dan QR tetap sama. Impor hasil baru sebelum membuka pengecekan.')}>Reset sesi</button>
+              </div>}
             </div>
           </section>
           <section className="panel" aria-labelledby="tickets-title">

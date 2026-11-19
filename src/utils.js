@@ -7,6 +7,7 @@ export const STATUS_NAMES = {
   DRAFT: 'Persiapan tiket',
   TICKETS_READY: 'Tiket siap, menunggu impor hasil',
   IMPORTING: 'Impor hasil sedang diproses',
+  RESETTING: 'Reset sesi belum selesai',
   LOCKED: 'Status keikutsertaan dikunci',
   LIVE: 'Sesi pengecekan dibuka',
   CLOSED: 'Sesi pengecekan ditutup',
@@ -73,10 +74,13 @@ function parseDelimited(text) {
 }
 
 export function parseEoCsv(text, expectedCount = 65) {
+  return parseEoRows(parseDelimited(text), expectedCount);
+}
+
+export function parseEoRows(rows, expectedCount = 65) {
   const count = validateTicketCount(expectedCount);
-  const rows = parseDelimited(text);
-  if (rows.length < 2) throw new Error('Berkas CSV kosong atau tidak memiliki baris data.');
-  const header = rows[0].map(v => v.toLowerCase().trim());
+  if (rows.length < 2) throw new Error('Berkas CSV/Excel kosong atau tidak memiliki baris data.');
+  const header = rows[0].map(v => String(v ?? '').replace(/^﻿/, '').toLowerCase().trim());
   const n = header.indexOf('nomor_registrasi');
   const t = header.indexOf('token_pengecekan');
   const s = header.indexOf('terpilih');
@@ -85,16 +89,28 @@ export function parseEoCsv(text, expectedCount = 65) {
     const registrationNumber = normalizeRegistrationNumber(r[n], count);
     const checkToken = String(r[t] || '').trim();
     if (checkToken !== `2027${registrationNumber}`) throw new Error(`Baris ${i + 2}: token harus 2027${registrationNumber}`);
-    const raw = String(r[s] || '').trim().toUpperCase();
+    const raw = String(r[s] ?? '').trim().toUpperCase();
     if (raw !== 'TRUE' && raw !== 'FALSE') throw new Error(`Baris ${i + 2}: terpilih wajib TRUE atau FALSE.`);
     return { registrationNumber, checkToken, selected: raw === 'TRUE' };
   });
-  if (result.length !== count) throw new Error(`CSV harus berisi tepat ${count} data. Terbaca: ${result.length}.`);
+  if (result.length !== count) throw new Error(`Berkas harus berisi tepat ${count} data. Terbaca: ${result.length}.`);
   const numbers = new Set(result.map(r => r.registrationNumber));
   if (numbers.size !== count) throw new Error('Ada nomor registrasi duplikat.');
-  const trueCount = result.filter(r => r.selected).length;
-  if (trueCount !== 8) throw new Error(`Kolom terpilih harus berisi tepat 8 TRUE. Saat ini terbaca ${trueCount}.`);
   return result;
+}
+
+export async function parseEoFile(file, expectedCount = 65) {
+  if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error('Pilih berkas CSV atau Excel (.xlsx).');
+  if (!file.size || file.size > 2 * 1024 * 1024) throw new Error('Ukuran berkas harus 1 byte sampai 2 MB.');
+  if (/\.csv$/i.test(file.name)) return parseEoCsv(await file.text(), expectedCount);
+  const { readSheet, SheetNotFoundError } = await import('read-excel-file/browser');
+  let rows;
+  try { rows = await readSheet(await file.arrayBuffer(), 'EO_Import'); }
+  catch (err) {
+    if (err instanceof SheetNotFoundError) throw new Error('Tab EO_Import tidak ditemukan. Gunakan format Excel unduhan aplikasi.');
+    throw new Error('Berkas Excel tidak dapat dibaca. Simpan kembali sebagai .xlsx atau CSV UTF-8.');
+  }
+  return parseEoRows(rows, expectedCount);
 }
 
 export function buildEoCsv(tickets, expectedCount = tickets?.length) {

@@ -148,18 +148,21 @@ for (const action of ['verify', 'publicInfo']) {
 }
 
 test('admin: no jitter or retry, even for BUSY or timeout', async () => {
-  for (const timeout of [false, true]) {
-    const b = await browser();
-    const rejection = assert.rejects(b.api.prizePoolRequest('adminGenerateTickets', { ticketCount: 65 }, 'secret'),
-      timeout ? /Koneksi habis waktu/ : /BUSY/);
-    assert.equal(b.submissions.length, 1);
-    assert.deepEqual(b.scheduled, [30000]);
-    assert.equal(b.submissions[0].payload.password, 'secret');
-    if (timeout) assert.equal(await b.next(), 30000);
-    else b.emit(b.submissions[0], { ok: false, error: 'BUSY', retryable: true });
-    await rejection;
-    assert.equal(b.submissions.length, 1);
-    b.clean();
+  for (const action of ['adminGenerateTickets', 'adminResetSession']) {
+    for (const timeout of [false, true]) {
+      const b = await browser();
+      const rejection = assert.rejects(b.api.prizePoolRequest(action, {}, 'secret'),
+        timeout ? /Koneksi habis waktu/ : /BUSY/);
+      assert.equal(b.submissions.length, 1);
+      assert.deepEqual(b.scheduled, [30000]);
+      assert.equal(b.submissions[0].payload.password, 'secret');
+      assert.equal(b.submissions[0].payload.action, action);
+      if (timeout) assert.equal(await b.next(), 30000);
+      else b.emit(b.submissions[0], { ok: false, error: 'BUSY', retryable: true });
+      await rejection;
+      assert.equal(b.submissions.length, 1);
+      b.clean();
+    }
   }
 });
 

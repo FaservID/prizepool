@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { unzipSync, zipSync } from 'fflate';
 import {
-  STATUS_NAMES, buildEoCsv, parseEoCsv, normalizeRegistrationNumber, validateTicketCount, validateTicketSet,
+  STATUS_NAMES, buildEoCsv, parseEoCsv, parseEoRows, parseEoFile, normalizeRegistrationNumber, validateTicketCount, validateTicketSet,
 } from '../src/utils.js';
 
 for (const value of [8, 65, 100, 999, '8', '100', ' 999 ']) {
@@ -25,7 +26,11 @@ for (const count of [8, 65, 100, 999]) {
   const empty = buildEoCsv([...tickets].reverse(), count);
   assert.equal(empty.trim().split('\r\n').length, count + 1);
   assert.ok(empty.includes('001,2027001,FALSE'));
-  assert.throws(() => parseEoCsv(empty, count), /8 TRUE/);
+  assert.equal(parseEoCsv(empty, count).filter(row => row.selected).length, 0);
+  for (const selected of [1, 3, 7, 8, count]) {
+    const dynamic = empty.trim().split('\r\n').map((row, i) => i > 0 && i <= selected ? row.replace(/FALSE$/, 'true') : row).join('\r\n');
+    assert.equal(parseEoCsv(dynamic, count).filter(row => row.selected).length, selected);
+  }
   const rows = empty.split('\r\n');
   for (let i = 1; i <= 8; i++) rows[i] = rows[i].replace(/FALSE$/, 'TRUE');
   const valid = rows.join('\r\n');
@@ -49,11 +54,56 @@ for (const count of [8, 65, 100, 999]) {
     assert.throws(() => parseEoCsv(valid.replace('001,2027001', `${outOfRange},2027${outOfRange}`), count), /Nomor registrasi harus/);
     assert.throws(() => validateTicketSet([...tickets.slice(0, -1), { registrationNumber: outOfRange, checkToken: `2027${outOfRange}` }], count), /di luar rentang/);
   }
-  if (count > 8) assert.throws(() => parseEoCsv(valid.replace('009,2027009,FALSE', '009,2027009,TRUE'), count), /8 TRUE/);
+  if (count > 8) assert.equal(parseEoCsv(valid.replace('009,2027009,FALSE', '009,2027009,TRUE'), count).filter(row => row.selected).length, 9);
 }
-assert.throws(() => parseEoCsv(''), /CSV kosong/);
+assert.throws(() => parseEoCsv(''), /kosong/);
 assert.throws(() => parseEoCsv('nomor,token,hasil\n001,2027001,TRUE'), /Header wajib/);
 assert.throws(() => parseEoCsv('"nomor_registrasi'), /kutip belum ditutup/);
+
+const header = ['nomor_registrasi', 'token_pengecekan', 'terpilih'];
+const excelRows = [header, ...Array.from({ length: 65 }, (_, i) => [i + 1, `2027${String(i + 1).padStart(3, '0')}`, i < 3])];
+assert.equal(parseEoRows(excelRows).filter(row => row.selected).length, 3);
+for (const bad of [null, '', 0, 1, 'yes', 'TRUEE']) {
+  assert.throws(() => parseEoRows([header, ...excelRows.slice(1).map((row, i) => i ? row : [row[0], row[1], bad])]), /TRUE atau FALSE/);
+}
+const xml = new TextEncoder();
+function xlsxFixture(rows, sheetName = 'EO_Import') {
+  const files = {
+    '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+    '_rels/.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    'xl/workbook.xml': `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+    'xl/worksheets/sheet1.xml': '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + rows.map((row, i) => `<row r="${i + 1}">` + row.map((value, j) => {
+      const ref = `${String.fromCharCode(65 + j)}${i + 1}`;
+      if (typeof value === 'boolean') return `<c r="${ref}" t="b"><v>${Number(value)}</v></c>`;
+      if (typeof value === 'number') return `<c r="${ref}"><v>${value}</v></c>`;
+      return `<c r="${ref}" t="inlineStr"><is><t>${value}</t></is></c>`;
+    }).join('') + '</row>').join('') + '</sheetData></worksheet>',
+  };
+  return new File([zipSync(Object.fromEntries(Object.entries(files).map(([name, content]) => [name, xml.encode(content)])))], 'hasil.xlsx');
+}
+for (const selected of [0, 1, 3, 9, 65]) {
+  const rows = [header, ...excelRows.slice(1).map((row, i) => [row[0], row[1], i < selected])];
+  assert.equal((await parseEoFile(xlsxFixture(rows))).filter(row => row.selected).length, selected);
+}
+const template = readFileSync(new URL('../public/Template_EO_PrizePool_2027.xlsx', import.meta.url));
+assert.equal((await parseEoFile(new File([template], 'template.xlsx'))).filter(row => row.selected).length, 0);
+assert.deepEqual(template, readFileSync(new URL('../examples/Template_EO_PrizePool_2027.xlsx', import.meta.url)));
+const archive = unzipSync(template);
+const guide = new TextDecoder().decode(archive['xl/worksheets/sheet2.xml']);
+assert.doesNotMatch(guide, /B5=8|57 FALSE|tepat 8/);
+assert.match(guide, /EO_Import/);
+const sheet = new TextDecoder().decode(archive['xl/worksheets/sheet1.xml']);
+archive['xl/worksheets/sheet1.xml'] = xml.encode(sheet.replace(/(<x:c\b[^>]*\br="C[234]"[^>]*><x:v>)FALSE(<\/x:v>)/g, '$1true$2'));
+assert.equal((await parseEoFile(new File([zipSync(archive)], 'hasil-edit.xlsx'))).filter(row => row.selected).length, 3);
+await assert.rejects(parseEoFile(xlsxFixture(excelRows), 100), /100 data/);
+await assert.rejects(parseEoFile(xlsxFixture(excelRows, 'PANDUAN')), /Tab EO_Import tidak ditemukan/);
+await assert.rejects(parseEoFile(new File(['broken'], 'hasil.xlsx')), /Excel tidak dapat dibaca/);
+await assert.rejects(parseEoFile(new File(['broken'], 'hasil.xls')), /CSV atau Excel/);
+await assert.rejects(parseEoFile(new File([], 'hasil.csv')), /1 byte sampai 2 MB/);
+await assert.rejects(parseEoFile(new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'hasil.xlsx')), /2 MB/);
+const csvFile = new File([header.join(',') + '\n' + excelRows.slice(1).map(row => row.join(',')).join('\n')], 'hasil.csv');
+assert.equal((await parseEoFile(csvFile)).filter(row => row.selected).length, 3);
 
 // Pemeriksaan source saja, bukan verifikasi tampilan di browser.
 const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
@@ -64,5 +114,13 @@ assert.match(css, /color-scheme:\s*light\s*;/);
 assert.doesNotMatch(app + css, /nb_theme|ThemeToggle|prefers-color-scheme|data-theme\s*=\s*["']dark/);
 assert.doesNotMatch(app + Object.values(STATUS_NAMES).join('\n'), /(?:hasil(?: pilihan)?|terpilih|CSV) EO\b|Yahh|berhak menerima Hidden Prize/i);
 assert.match(app, /berhak mengikuti Hidden Prize NBSA/);
-assert.doesNotMatch(app, /2027052/);
-console.log('PASS frontend: konfigurasi 8/65/100/999, CSV lengkap dengan 8 TRUE, validasi pasangan dan jumlah, default 65, source light-only, bahasa status keikutsertaan.');
+assert.doesNotMatch(app, /2027052|tepat 8|8 tiket terpilih|\/ 8<\/span>/);
+assert.match(app, /rows\.filter\(row => row\.selected\)\.length/);
+assert.match(app, /Tidak ada tiket terpilih\. Pastikan berkas/);
+assert.equal(STATUS_NAMES.RESETTING, 'Reset sesi belum selesai');
+assert.match(app, /if \(!window\.confirm\(question\)\) return;/);
+assert.match(app, /disabled=\{sessionDisabled\} aria-describedby="reset-session-help" onClick=\{\(\) => execute\('adminResetSession'/);
+assert.match(app, /dihapus dan tidak dapat dipulihkan melalui aplikasi/);
+assert.match(app, /Nomor, token, jumlah tiket, dan QR tetap sama/);
+assert.match(app, /Anda harus mengimpor hasil baru sebelum membuka sesi kembali/);
+console.log('PASS frontend: konfigurasi 8/65/100/999, CSV/XLSX, boolean Excel, jumlah terpilih dinamis, validasi tiket, source light-only, reset dengan konfirmasi dan penjelasan dampak.');

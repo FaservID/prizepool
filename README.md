@@ -8,16 +8,16 @@
 |---|---|---|
 | **H-1** | Admin mengisi **Jumlah tiket** pada **Pengaturan sesi**, klik **Buat tiket**, lalu unduh JPG/ZIP atau buka **Pratinjau cetak A4**. | Membuat nomor berurutan mulai `001` dan token `2027` + nomor sebanyak konfigurasi; **belum ada yang TRUE**. Semua QR berisi tautan halaman peserta yang sama, tanpa parameter token. |
 | **Hari H: registrasi awal** | Bagikan **1 tiket ke 1 karyawan** secara acak. Nama tidak dicatat. | QR universal membuka halaman peserta, tidak memuat nomor tiket, nama, atau pemenang. |
-| **Hari H: sebelum Hidden Prize** | EO memilih **Unduh format CSV** sesuai jumlah tiket, lalu mengisi kolom `terpilih` dengan tepat 8 nilai `TRUE`, sisanya `FALSE`. | Hasil belum otomatis terlihat oleh karyawan. Template Excel standar tersedia hanya untuk 65 tiket. |
-| **Sebelum pengumuman** | EO mengirimkan CSV akhir kepada admin, lalu admin mengunggahnya pada **Unggah berkas CSV**. | Backend memvalidasi seluruh nomor sesuai konfigurasi, pasangan token, dan tepat 8 TRUE, lalu mengunci hasil (LOCKED). |
+| **Hari H: sebelum Hidden Prize** | EO memilih **Unduh format CSV** sesuai jumlah tiket, lalu mengisi kolom `terpilih` dengan `TRUE` untuk tiket terpilih dan `FALSE` untuk lainnya. Jumlah terpilih mengikuti berkas. | Hasil belum otomatis terlihat oleh karyawan. Template Excel standar tersedia hanya untuk 65 tiket. |
+| **Sebelum pengumuman** | EO mengirimkan berkas akhir kepada admin, lalu admin memilih **Unggah berkas CSV atau Excel**. | Aplikasi menampilkan jumlah TRUE/FALSE untuk dikonfirmasi; backend memvalidasi seluruh nomor, pasangan token, dan status boolean, lalu mengunci hasil (LOCKED). |
 | **Sesi Hidden Prize** | MC meminta karyawan memindai QR dan memasukkan `2027` + nomor tiket 3 digit (contoh registrasi `052` menjadi `2027052`). Admin memilih **Buka sesi pengecekan**. | Sistem memeriksa token pengecekan saat sesi LIVE, lalu menampilkan status terpilih TRUE / FALSE. |
 | **Selesai** | Admin memilih **Tutup sesi pengecekan**. | Pengecekan ditutup, riwayat scan tersimpan. |
 
-**Tidak ada pengacakan pemenang di aplikasi.** EO yang menentukan tepat 8 `TRUE` melalui file. Tidak ada nama karyawan pada spreadsheet, tiket, atau formulir. Cetak ulang harus memakai QR yang **sama** (jangan generate ulang).
+**Tidak ada pengacakan peserta terpilih di aplikasi.** EO menentukan status `TRUE`/`FALSE` melalui berkas. Jumlah terpilih boleh 0 sampai seluruh tiket; konfirmasi impor memperingatkan jika jumlahnya 0. Tidak ada nama karyawan pada spreadsheet, tiket, atau formulir. Cetak ulang harus memakai QR yang **sama** (jangan generate ulang).
 
 ## Konfigurasi jumlah tiket
 
-Pada status `DRAFT`, isi **Jumlah tiket** (bilangan bulat 8–999) sebelum menekan **Buat tiket**. Batas ini mempertahankan nomor 3 digit dan tepat 8 pilihan EO. Default 65 tetap tersedia untuk acara lama. Jumlah disimpan sebagai `TICKET_COUNT` di tab `Settings` ketika tiket dibuat.
+Pada status `DRAFT`, isi **Jumlah tiket** (bilangan bulat 8–999) sebelum menekan **Buat tiket**. Rentang jumlah tiket tetap 8–999; jumlah terpilih tidak dibatasi 8. Default 65 tetap tersedia untuk acara lama. Jumlah disimpan sebagai `TICKET_COUNT` di tab `Settings` ketika tiket dibuat.
 
 Setelah dibuat, jumlah, nomor, dan token tiket tidak dapat diubah melalui aplikasi. Statistik, CSV EO, jumlah JPG dalam ZIP, progres ekspor, dan cetak A4 mengikuti konfigurasi tersimpan. Jangan mengubah `TICKET_COUNT` atau baris tiket secara manual untuk mengubah jumlah acara berjalan. Gunakan spreadsheet baru untuk acara terpisah.
 
@@ -38,11 +38,11 @@ nomor_registrasi,token_pengecekan,terpilih
 065,2027065,FALSE
 ```
 
-EO harus mengganti tepat 8 baris menjadi `TRUE`, tanpa menghapus baris, mengganti nomor, atau mengganti token. Backend menolak jumlah TRUE selain 8, jumlah baris yang tidak sesuai konfigurasi, nomor duplikat, atau token salah. Impor hanya diizinkan sekali dan hasil tidak bisa ditimpa dari dashboard.
+EO mengisi `TRUE` pada nomor terpilih dan `FALSE` pada lainnya, tanpa menghapus baris, mengganti nomor, atau mengganti token. Huruf besar/kecil diterima; sel kosong atau nilai selain TRUE/FALSE ditolak. Backend tetap menolak jumlah baris yang tidak sesuai konfigurasi, nomor duplikat, token salah, dan status bukan boolean. Impor hanya diizinkan sekali per sesi. Hasil terkunci tidak bisa ditimpa; admin harus melakukan reset sesi terlebih dahulu sebelum mengimpor hasil pengganti.
 
-Jika membuka CSV di Excel, kolom `001` dapat berubah menjadi `1` secara otomatis. Importer frontend menerima `1` dan mengubahnya ke `001`. Untuk semua jumlah tiket, gunakan CSV unduhan dashboard yang berasal dari data aktif backend. Simpan hasil akhir sebagai CSV UTF-8. Berkas Excel `.xlsx` tidak bisa langsung diunggah.
+Jika membuka CSV di Excel, kolom `001` dapat berubah menjadi `1` secara otomatis. Importer frontend menerima `1` dan mengubahnya ke `001`. Untuk semua jumlah tiket, gunakan CSV unduhan dashboard yang berasal dari data aktif backend. Simpan hasil akhir sebagai CSV UTF-8. Berkas Excel `.xlsx` juga bisa diunggah langsung: aplikasi membaca tab `EO_Import`, termasuk sel boolean TRUE/FALSE Excel, tanpa mengirim workbook ke layanan luar. Batas unggahan 2 MB; `.xls` tidak didukung.
 
-Template statis `examples/Template_EO_PrizePool_2027.xlsx`, `examples/template_EO_prizepool_2027.csv`, dan XLSX di `public/` berisi 65 tiket. Link Excel pada dashboard hanya tampil untuk konfigurasi 65; kolom nomor pada tab `EO_Import` sudah diformat sebagai teks. Untuk jumlah lain, gunakan CSV dinamis, bukan template statis tersebut.
+Template statis `examples/Template_EO_PrizePool_2027.xlsx`, `examples/template_EO_prizepool_2027.csv`, dan XLSX di `public/` berisi 65 tiket. Link Excel pada dashboard hanya tampil untuk konfigurasi 65; kolom nomor pada tab `EO_Import` sudah diformat sebagai teks. Untuk jumlah lain, gunakan CSV dinamis, bukan template statis tersebut. Jika hasil terbaca 0 padahal ada pilihan, pastikan perubahan tersimpan di kolom `terpilih` pada `EO_Import` dan unggah berkas hasil edit, bukan unduhan awal yang seluruhnya FALSE. Untuk CSV, ekspor tab `EO_Import`, bukan `PANDUAN`.
 
 ## Cara update dari proyek `FaservID/prizepool` lama
 
@@ -71,6 +71,8 @@ Template statis `examples/Template_EO_PrizePool_2027.xlsx`, `examples/template_E
 
 Untuk pembaruan dari versi tiket QR yang sudah memakai schema sekarang, perbarui `Code.gs` dan deploy sebagai **New version**, lalu perbarui frontend. Tidak perlu inisialisasi atau generate ulang tiket. Acara lama tanpa key `TICKET_COUNT` tetap dibaca sebagai 65 tiket; data tiket dan hasil EO dipertahankan. Ekspor QR kini berisi tautan umum halaman peserta, misalnya `https://faservid.github.io/prizepool/`, tanpa `?qr=...`. Tautan cetakan lama tetap bisa dibuka; frontend baru mengabaikan parameter QR lama dan meminta token `2027NNN`. Backend juga masih memvalidasi pasangan QR/token bila klien lama mengirimkannya. Kolom `qr_token` tetap disimpan untuk kompatibilitas, tetapi bukan syarat pengecekan melalui tautan umum. Konfigurasi jumlah baru hanya tersedia ketika status masih `DRAFT`. Backend wajib diperbarui sebelum memakai frontend dan ekspor QR universal.
 
+Untuk pembaruan jumlah terpilih dinamis dan tombol reset, deploy `Code.gs` terbaru sebagai **New version sebelum memperbarui frontend**. Backend lama masih menolak jumlah selain 8 dan belum mengenali `adminResetSession`. Tiket tidak perlu dibuat ulang; hasil yang sudah LOCKED/LIVE/CLOSED tetap terkunci sampai admin mengonfirmasi reset sesi.
+
 ### 3. Konfigurasi Apps Script untuk pertama kali
 
 1. Buat Google Spreadsheet **privat**, lalu `Extensions → Apps Script`.
@@ -84,13 +86,22 @@ Backend menggunakan iframe POST + `postMessage` untuk menanggapi browser GitHub 
 ## Fitur & status
 
 - `DRAFT`: belum ada tiket; panitia mengatur jumlah 8–999 sebelum membuat tiket.
-- `TICKETS_READY`: jumlah dan data tiket sudah terkunci, tetapi belum ada hasil TRUE. Cetak dan unduh template EO, kemudian impor CSV saat hari H.
-- `IMPORTING`: status fail-closed bila penulisan hasil EO terhenti; periksa secara manual, jangan acak ulang.
-- `LOCKED`: sudah valid tepat 8 TRUE dan sisanya FALSE, belum diumumkan.
+- `TICKETS_READY`: jumlah dan data tiket sudah terkunci, tetapi hasil belum diimpor. Cetak dan unduh format hasil, kemudian impor CSV atau XLSX saat hari H.
+- `IMPORTING`: verifikasi ditutup selama penulisan hasil. Bila status tidak berubah setelah proses selesai, reset sesi sebelum mengimpor ulang.
+- `RESETTING`: verifikasi dan impor ditutup selama reset. Bila reset terhenti, segarkan data dan ulangi reset setelah proses sebelumnya selesai.
+- `LOCKED`: seluruh status TRUE/FALSE telah divalidasi dan dikunci sesuai berkas, belum diumumkan.
 - `LIVE`: tautan QR universal + token pengecekan dapat dipakai peserta untuk cek hasil.
 - `CLOSED`: pengumuman ditutup.
 
 Daftar tiket berada pada tab `Participants`, dengan kolom `nomor_registrasi`, `token_pengecekan`, `qr_token`, `terpilih`, `waktu_scan_pertama`.
+
+### Reset sesi tanpa mengganti tiket
+
+Pada **Pengaturan sesi**, pilih **Reset sesi** lalu baca konfirmasinya. Tindakan ini menutup pengecekan, mengembalikan seluruh `terpilih` ke FALSE, mengosongkan `waktu_scan_pertama` dan `LOCKED_AT`, lalu mengembalikan status ke `TICKETS_READY`. Hasil dan waktu pengecekan yang dihapus tidak dapat dipulihkan melalui aplikasi. Nomor, token, jumlah tiket, QR tercetak, password, dan pengaturan acara tetap sama. Riwayat `Audit` tidak dihapus; reset menambahkan catatan baru.
+
+Setelah reset, unggah CSV/XLSX baru, konfirmasi jumlah terpilih, lalu buka sesi pengecekan. Reset tersedia setelah tiket dibuat, termasuk untuk memulihkan proses `IMPORTING` atau `RESETTING` yang terhenti. Tidak ada reset otomatis dan tidak perlu membuat tiket ulang. Status `CLOSED` tidak dapat langsung dibuka kembali tanpa reset dan impor baru.
+
+Setiap reset mengganti `SESSION_ID` internal untuk memisahkan cache hasil lama. Request verifikasi lama yang menemui ID sesi berbeda ditolak sebelum mencatat scan pada sesi baru atau mengembalikan hasil. Reset tidak menarik kembali hasil yang sudah tampil di ponsel peserta. Jika koneksi admin habis waktu, segarkan data sebelum mencoba tindakan berikutnya; timeout browser tidak membuktikan proses backend berhenti. Reset memakai beberapa penulisan spreadsheet, bukan transaksi atomik; jika gagal sebelum selesai, status `RESETTING` menahan verifikasi dan impor sampai admin mengulangi reset.
 
 ## Keamanan / batasan
 
@@ -99,7 +110,7 @@ Daftar tiket berada pada tab `Participants`, dengan kolom `nomor_registrasi`, `t
 - Google Sheets tetap bisa diubah manual oleh orang yang memiliki hak edit; batasi akses edit untuk panitia inti dan simpan salinan file EO final sebagai audit.
 - Web statis + Apps Script bergantung pada kuota layanan Google dan dukungan browser terhadap bridge iframe. Sesuai dokumentasi resmi Google, batas eksekusi bersamaan (*simultaneous executions*) adalah 30 per akun Google pengguna (1.000 per script); kuota 20.000/100.000 per hari adalah kuota URL Fetch keluar, bukan kuota Web App HTTP masuk. Jika lonjakan request melampaui batas bersamaan Google, server dapat menolak request sebelum kode script dieksekusi.
 - **Optimasi scan serentak:**
-  - Cache server-side (*ScriptCache*) memangkas I/O spreadsheet: daftar tiket dan hasil verifikasi di-cache hingga 5 menit; statistik publik di-cache 5 detik. Status sesi tetap dibaca langsung dari `Settings` pada setiap verifikasi. Scan ulang tiket yang sama dilayani dari cache hasil verifikasi tanpa membaca tab `Participants` dan tanpa mengambil lock.
+  - Cache server-side (*ScriptCache*) memangkas I/O spreadsheet: daftar tiket dan hasil verifikasi di-cache hingga 5 menit; statistik publik di-cache 5 detik. Status dan `SESSION_ID` tetap dibaca langsung dari `Settings` pada setiap verifikasi dan diperiksa ulang sebelum hasil dikembalikan. Cache memakai namespace per sesi; statistik publik juga dipisahkan berdasarkan status. Scan ulang tiket yang sama dilayani dari cache hasil verifikasi tanpa membaca tab `Participants` dan tanpa mengambil lock.
   - Sesi yang diaktifkan ke `LIVE` langsung menghangatkan cache daftar tiket agar verifikasi awal tidak membaca massal seluruh baris tiket.
   - Verifikasi cache-miss menunggu lock maksimal 100 ms (`tryLock(100)`). Di dalam lock, backend membaca satu baris tiket, menulis timestamp scan pertama, mencatat audit log, dan memanggil `flush()`. First-scan tetap dicatat serial di spreadsheet.
   - Jika lock gagal didapat dalam 100 ms karena contention, envelope JSON mengembalikan `retryable: true` dengan pesan server sibuk (kode error `BUSY` ditangani internal).
@@ -120,5 +131,5 @@ npm run build
 
 Saat development di laptop tambahkan `http://localhost:5173` ke origin pada menu spreadsheet. File `.env.example` dapat disalin menjadi `.env`; `VITE_BASE_PATH=/`, `VITE_GAS_URL=<URL exec>`.
 
-**Pengujian otomatis:** `npm test` mencakup jumlah 8, 65, 100, dan 999, kompatibilitas acara lama, penolakan konfigurasi invalid tanpa perubahan data, CSV dengan tepat 8 TRUE, hasil terkunci, URL dan verifikasi universal, kompatibilitas pasangan QR/token lama, scan ulang, ekspor ZIP universal dengan jumlah dinamis, 15 pengujian browser retry/bridge (jitter, timeout 4 percobaan, pemulihan BUSY, isolasi mutasi admin), serta pengujian backend konkurensi (interleaving deterministik, fail-open cache, batas tunggu lock 100 ms, pemanasan cache LIVE). Pemeriksaan light-only berbasis source; tes canvas memakai mock, bukan rasterisasi atau pemindaian QR sungguhan. Tes ini bukan pengganti pemeriksaan browser, cetak/pindai fisik, atau pengujian Google Apps Script end-to-end.
+**Pengujian otomatis:** `npm test` mencakup jumlah 8, 65, 100, dan 999, kompatibilitas acara lama, penolakan konfigurasi invalid tanpa perubahan data, CSV/XLSX dengan jumlah terpilih dinamis (termasuk 0 dan seluruh tiket), boolean Excel, validasi berkas rusak, hasil terkunci, URL dan verifikasi universal, kompatibilitas pasangan QR/token lama, scan ulang, ekspor ZIP universal dengan jumlah dinamis, 15 pengujian browser retry/bridge (jitter, timeout 4 percobaan, pemulihan BUSY, isolasi mutasi admin), serta pengujian backend konkurensi (interleaving deterministik, fail-open cache, batas tunggu lock 100 ms, pemanasan cache LIVE), reset sesi tanpa mengganti tiket/QR, impor baru setelah reset, pemulihan reset gagal, dan isolasi cache/request antar sesi. Pemeriksaan tombol reset dan light-only berbasis source; tes canvas memakai mock, bukan rasterisasi atau pemindaian QR sungguhan. Tes ini bukan pengganti pemeriksaan browser, cetak/pindai fisik, atau pengujian Google Apps Script end-to-end.
 # prizepool

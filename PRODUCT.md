@@ -20,11 +20,12 @@ Tiket disiapkan sebelum acara, dibagikan saat registrasi, dan diperiksa melalui 
 
 ## Capabilities and Constraints
 
-- Jumlah tiket dikonfigurasi panitia saat DRAFT, sebelum tiket dibuat. Default 65 untuk kompatibilitas acara lama; rentang implementasi 8–999 mempertahankan nomor 3 digit dan tepat 8 TRUE dari EO.
+- Jumlah tiket dikonfigurasi panitia saat DRAFT, sebelum tiket dibuat. Default 65 untuk kompatibilitas acara lama; rentang implementasi 8–999 mempertahankan nomor 3 digit. Jumlah terpilih mengikuti nilai TRUE dalam berkas hasil, dari 0 sampai seluruh tiket; tidak ada batas tetap 8.
 - Sesudah dibuat, jumlah dan data tiket terkunci. Nomor berurutan mulai 001; token tetap 2027XXX. CSV EO, statistik, ekspor JPG/ZIP, dan cetak mengikuti jumlah tersimpan.
 - Peserta, login, dan admin memakai light mode saja, tanpa mengikuti tema OS atau preferensi dark lama.
-- QR universal mengarahkan peserta ke tautan aplikasi, dan peserta memasukkan token pengecekan pada tiket fisik. Hasil diimpor sekali, dikunci, dan tidak berubah ketika dipindai ulang.
-- Pertahankan backend Google Apps Script dan alur DRAFT, TICKETS_READY, IMPORTING, LOCKED, LIVE, CLOSED.
+- QR universal mengarahkan peserta ke tautan aplikasi, dan peserta memasukkan token pengecekan pada tiket fisik. Hasil CSV atau Excel (.xlsx, tab EO_Import) dibaca lokal di browser. Konfirmasi menunjukkan jumlah TRUE/FALSE dan memperingatkan bila tidak ada tiket terpilih. Hasil diimpor sekali per sesi, dikunci, dan tidak berubah ketika dipindai ulang.
+- Admin dapat melakukan reset sesi setelah konfirmasi: hapus hasil terpilih, waktu pengecekan, dan waktu penguncian; pertahankan jumlah, nomor, token, QR, pengaturan acara, serta riwayat audit. Reset kembali ke TICKETS_READY dan wajib diikuti impor hasil sebelum sesi dibuka kembali. Cache hasil dipisahkan per sesi.
+- Pertahankan backend Google Apps Script dan alur DRAFT, TICKETS_READY, IMPORTING, LOCKED, LIVE, CLOSED. RESETTING menutup verifikasi dan impor selama reset; bila terhenti, admin dapat mengulangi reset.
 - Remake mencakup halaman peserta dan admin yang responsif.
 - QR cetak harus menerima logo perusahaan dari unggahan pengguna, ditempatkan di tengah.
 - Sediakan pengaturan tampilan QR, pratinjau, cetak A4, dan bulk ZIP. ZIP mengemas berkas gambar QR Code individual (hanya QR murni, tanpa desain kartu atau teks tambahan).
