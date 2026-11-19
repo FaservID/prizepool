@@ -101,7 +101,9 @@ Setelah login, tabel tiket dan angka statistik diperbarui otomatis melalui `admi
 
 Hanya satu request polling berjalan pada satu waktu. Polling dijeda saat tab tersembunyi, operasi admin, atau ekspor; saat tab terlihat kembali, pembaruan langsung dicoba. **Jeda pembaruan otomatis** menghentikan polling sampai diaktifkan lagi, sedangkan **Segarkan data** tetap tersedia. Pencarian, tampilan hasil, pengaturan ekspor, dan kolom jumlah tiket yang sedang diedit tidak direset oleh polling. Jika koneksi gagal, data terakhir tetap tampil dengan pesan gagal; jeda percobaan bertambah menjadi 10, 20, lalu maksimal 30 detik dan kembali 5 detik setelah berhasil. Request browser yang dibatalkan dibersihkan dan respons terlambat diabaikan; pembatalan tidak menghentikan eksekusi Apps Script yang sudah berjalan.
 
-Fitur ini memakai endpoint admin yang sudah ada, tanpa mengubah data atau hasil. Setiap tab admin aktif menambah request Apps Script, jadi hindari membuka banyak tab pemantauan. Perubahan polling cukup memperbarui frontend; backend tetap harus memakai versi terbaru untuk fitur impor dinamis dan reset sesi.
+Waktu **Data terakhir diterima** berubah setelah respons admin berhasil diterima, termasuk jika isi tabel tidak berubah. Jika gagal, waktu dan data terakhir tetap ditampilkan bersama pesan error asli dari server. Backend terbaru membalas penolakan domain melalui bridge agar pesan tersebut tampil, bukan hanya timeout. Untuk perbaikan pesan domain, perbarui `Code.gs` dan deploy sebagai **New version**, tanpa inisialisasi, reset, atau pembuatan tiket ulang.
+
+Fitur ini memakai endpoint admin yang sudah ada, tanpa mengubah data atau hasil. Setiap tab admin aktif menambah request Apps Script, jadi hindari membuka banyak tab pemantauan. Jadwal polling berada di frontend; backend tetap harus memakai versi terbaru untuk fitur impor dinamis dan reset sesi.
 
 ### Reset sesi tanpa mengganti tiket
 
@@ -136,6 +138,14 @@ npm test
 npm run dev
 npm run build
 ```
+
+Regresi refresh dengan React dan DOM browser asli tersedia terpisah:
+
+```bash
+node tests/admin-refresh.browser.mjs
+```
+
+Tes memakai Edge Windows secara default; pada OS lain atur `BROWSER_PATH` ke executable Chrome/Edge. Tes tidak menjalankan server atau mengakses data acara. Transport POST sengaja diisolasi, sehingga hasilnya tidak membuktikan deployment Apps Script atau konfigurasi produksi benar.
 
 Saat development di laptop tambahkan `http://localhost:5173` ke origin pada menu spreadsheet. File `.env.example` dapat disalin menjadi `.env`; `VITE_BASE_PATH=/`, `VITE_GAS_URL=<URL exec>`.
 

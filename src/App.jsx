@@ -157,6 +157,7 @@ function AdminPage({ refreshPublicInfo }) {
   const [search, setSearch] = useState('');
   const [showResults, setShowResults] = useState(false);
   const [syncError, setSyncError] = useState('');
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const stopPollingRef = useRef(null);
   const [companyName, setCompanyName] = useState(() => {
@@ -227,7 +228,8 @@ function AdminPage({ refreshPublicInfo }) {
     const stop = pollAdminStats(password, response => {
       setData(response);
       setSyncError('');
-    }, () => setSyncError('Pembaruan otomatis gagal. Data terakhir tetap ditampilkan; mencoba lagi. Gunakan Segarkan data untuk memeriksa koneksi.'));
+      setLastSyncedAt(new Date());
+    }, err => setSyncError(`Pembaruan otomatis gagal: ${err.message || 'Koneksi tidak tersedia.'} Data terakhir tetap ditampilkan; mencoba lagi.`));
     stopPollingRef.current = stop;
     return () => {
       stop();
@@ -245,6 +247,7 @@ function AdminPage({ refreshPublicInfo }) {
       setData(response);
       setTicketCountInput(String(response.maxParticipants ?? 65));
       setSyncError('');
+      setLastSyncedAt(new Date());
       refreshPublicInfo();
       return response;
     } catch (err) {
@@ -418,18 +421,20 @@ function AdminPage({ refreshPublicInfo }) {
             <div className="button-row">
               <button type="button" className="btn btn-outline" aria-pressed={autoRefresh} disabled={sessionDisabled} onClick={() => { stopPollingRef.current?.(); setAutoRefresh(value => !value); setSyncError(''); }}>{autoRefresh ? 'Jeda pembaruan otomatis' : 'Aktifkan pembaruan otomatis'}</button>
               <button type="button" className="btn btn-outline" disabled={busy || !!exporting} onClick={() => send('adminStats').catch(() => {})}>{busy ? 'Memuat…' : 'Segarkan data'}</button>
-              <button type="button" className="text-button" disabled={busy || !!exporting} onClick={() => { stopPollingRef.current?.(); setPassword(''); setData(null); setShowResults(false); setError(''); setSuccess(''); setSyncError(''); setAutoRefresh(true); }}>Keluar</button>
+              <button type="button" className="text-button" disabled={busy || !!exporting} onClick={() => { stopPollingRef.current?.(); setPassword(''); setData(null); setShowResults(false); setError(''); setSuccess(''); setSyncError(''); setLastSyncedAt(null); setAutoRefresh(true); }}>Keluar</button>
             </div>
           </div>
           <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
           <Notice type="error">{syncError}</Notice>
+          {lastSyncedAt && <p className="field-help">Data terakhir diterima: <time dateTime={lastSyncedAt.toISOString()}>{lastSyncedAt.toLocaleTimeString('id-ID', { hour12: false })}</time>. {busy ? 'Memuat data…' : 'Tombol Segarkan data mengambil ulang tabel dari Google Sheets.'}</p>}
           <dl className="stats-grid" aria-label="Jumlah tiket">
             <div><dt>Tiket tersedia</dt><dd>{data?.total ?? 0}<span> / {ticketCount}</span></dd></div>
             <div><dt>Tiket terpilih</dt><dd>{data?.selected ?? 0}<span> / {ticketCount}</span></dd></div>
             <div><dt>Sudah diperiksa</dt><dd>{data?.checked ?? 0}<span> / {ticketCount}</span></dd></div>
           </dl>
-          <section className="panel" aria-labelledby="studio-title">
-            <div className="section-heading"><h2 id="studio-title">Studio tiket</h2><p>ZIP berisi QR saja dalam format JPG. Kartu tiket tersedia lewat JPG satuan atau cetak A4.</p></div>
+          <details className="panel collapsible-panel" open aria-labelledby="studio-title">
+            <summary><h2 id="studio-title">Studio tiket</h2></summary>
+            <div className="section-heading"><p>ZIP berisi QR saja dalam format JPG. Kartu tiket tersedia lewat JPG satuan atau cetak A4.</p></div>
             <div className="qr-studio-grid">
               <fieldset className="studio-controls" disabled={busy || !!exporting || logoLoading}>
                 <legend className="sr-only">Pengaturan logo dan ekspor</legend>
@@ -464,9 +469,10 @@ function AdminPage({ refreshPublicInfo }) {
                 <Notice type="error">{previewError}</Notice>
               </figure>
             </div>
-          </section>
-          <section className="panel" aria-labelledby="flow-title">
-            <div className="section-heading"><h2 id="flow-title">Pengaturan sesi</h2><p>Hasil dikunci selama sesi. Untuk mengimpor hasil baru, reset sesi terlebih dahulu. Nomor tiket dan QR tetap sama.</p></div>
+          </details>
+          <details className="panel collapsible-panel" open aria-labelledby="flow-title">
+            <summary><h2 id="flow-title">Pengaturan sesi</h2></summary>
+            <div className="section-heading"><p>Hasil dikunci selama sesi. Untuk mengimpor hasil baru, reset sesi terlebih dahulu. Nomor tiket dan QR tetap sama.</p></div>
             {data?.status !== 'DRAFT' && <p className="field-help">Jumlah terkunci: {ticketCount} tiket. Nomor 001–{lastNumber}, token 2027001–2027{lastNumber}.</p>}
             <div className="session-actions">
               {data?.status === 'DRAFT' && <div>
@@ -493,7 +499,7 @@ function AdminPage({ refreshPublicInfo }) {
                 <button type="button" className="btn btn-danger" disabled={sessionDisabled} aria-describedby="reset-session-help" onClick={() => execute('adminResetSession', 'Reset sesi sekarang? Pengecekan peserta akan ditutup. Seluruh hasil terpilih dan waktu pengecekan akan dihapus dan tidak dapat dipulihkan melalui aplikasi. Nomor, token, jumlah tiket, dan QR tetap sama; riwayat audit dipertahankan. Anda harus mengimpor hasil baru sebelum membuka sesi kembali.', 'Sesi direset. Tiket dan QR tetap sama. Impor hasil baru sebelum membuka pengecekan.')}>Reset sesi</button>
               </div>}
             </div>
-          </section>
+          </details>
           <section className="panel" aria-labelledby="tickets-title">
             <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket menggunakan nomor registrasi, tanpa mencatat nama karyawan. {autoRefresh ? 'Pembaruan otomatis aktif: data diminta setiap 5 detik setelah respons sebelumnya. Dijeda saat tab tersembunyi, proses admin, atau ekspor.' : 'Pembaruan otomatis dijeda. Gunakan Segarkan data untuk memperbarui tabel dan jumlah.'}</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil' : 'Tampilkan hasil'}</button></div>
             <div className="table-toolbar"><div className="search-field"><label htmlFor="ticket-search">Cari nomor atau token</label><input id="ticket-search" className="input-field" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="052 atau nomor token" /></div><p className="field-help" role="status">{filtered.length} dari {data?.tickets?.length || 0} tiket</p></div>

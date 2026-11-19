@@ -129,4 +129,7 @@ assert.match(app, /const send = useCallback\(async[^\n]*\n\s*stopPollingRef\.cur
 assert.match(app, /aria-pressed=\{autoRefresh\}/);
 assert.match(app, /Jeda pembaruan otomatis/);
 assert.match(app, /<Notice type="error">\{syncError\}<\/Notice>/);
+assert.match(app, /Pembaruan otomatis gagal: \$\{err\.message/);
+assert.match(app, /Data terakhir diterima: <time dateTime=\{lastSyncedAt\.toISOString\(\)\}/);
+assert.equal((app.match(/setLastSyncedAt\(new Date\(\)\)/g) || []).length, 2);
 console.log('PASS frontend: konfigurasi tiket/terpilih dinamis, CSV/XLSX, boolean Excel, validasi tiket, source light-only, reset terkonfirmasi, integrasi polling admin dan tombol jeda.');

@@ -93,12 +93,15 @@ function doPost(e) {
   const origin = String(e && e.parameter && e.parameter.origin || '');
   const allowedOrigins = String(PropertiesService.getScriptProperties().getProperty('ALLOWED_ORIGINS') || '')
     .split(',').map(x => x.trim()).filter(Boolean);
-  if (!allowedOrigins.includes(origin)) {
-    return HtmlService.createHtmlOutput('<p>Domain tidak diizinkan. Periksa pengaturan origin di Google Sheets.</p>')
+  if (!/^https:\/\/[-a-zA-Z0-9.]+(?::\d+)?$/.test(origin) && !/^http:\/\/(?:localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+    return HtmlService.createHtmlOutput('<p>Origin tidak valid.</p>')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
   let envelope;
   try {
+    if (!allowedOrigins.includes(origin)) {
+      throw new Error('Domain website belum diizinkan. Tambahkan ' + origin + ' melalui menu Atur Domain Website di Google Sheets.');
+    }
     const raw = String(e.parameter.payload || '');
     if (raw.length > 80000) throw new Error('Payload terlalu besar.');
     const payload = JSON.parse(raw);

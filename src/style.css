@@ -962,6 +962,17 @@ img, svg {
   box-shadow: 0 16px 36px rgba(125, 93, 34, 0.10);
 }
 
+.collapsible-panel > summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.collapsible-panel > summary h2 {
+  display: inline;
+  margin-left: 8px;
+  font-size: 19px;
+}
+
 .section-heading {
   margin-bottom: 20px;
 }

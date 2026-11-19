@@ -192,7 +192,22 @@ const html=run('doPost(request)').html;
 assert.ok(html.includes('NBSA_PRIZEPOOL_RESULT'));
 assert.ok(!html.includes(initial.tickets[0].token));
 ctx.wrongOrigin={parameter:{...request.parameter,origin:'https://attacker.example'}};
-assert.ok(!run('doPost(wrongOrigin)').html.includes('NBSA_PRIZEPOOL_RESULT'));
+const beforeDeniedOrigin = snapshot();
+ctx.wrongOrigin.parameter.payload = JSON.stringify({ action: 'adminClose', password: 'testing-password-very-long' });
+const deniedOriginHtml = run('doPost(wrongOrigin)').html;
+assert.ok(deniedOriginHtml.includes('NBSA_PRIZEPOOL_RESULT'));
+assert.ok(deniedOriginHtml.includes('"ok":false'));
+assert.ok(deniedOriginHtml.includes('Domain website belum diizinkan'));
+assert.ok(deniedOriginHtml.includes('https://attacker.example'));
+assert.ok(!deniedOriginHtml.includes(initial.tickets[0].token));
+assert.equal(snapshot(), beforeDeniedOrigin, 'Denied origin must not dispatch an authenticated mutation');
+for (const origin of ['null', 'file://', 'https://attacker.example/\"<script>', 'javascript:alert(1)', 'http://attacker.example']) {
+  ctx.wrongOrigin.parameter.origin = origin;
+  const invalidOriginHtml = run('doPost(wrongOrigin)').html;
+  assert.ok(!invalidOriginHtml.includes('NBSA_PRIZEPOOL_RESULT'));
+  assert.ok(!invalidOriginHtml.includes('<script>'));
+  assert.equal(snapshot(), beforeDeniedOrigin);
+}
 run("changeStatus_('LIVE','CLOSED')");
 assert.throws(()=>run('verifyTicket_(verifyArgs)'),/ditutup/);
 function admin(action, args = {}) {
