@@ -123,4 +123,10 @@ assert.match(app, /disabled=\{sessionDisabled\} aria-describedby="reset-session-
 assert.match(app, /dihapus dan tidak dapat dipulihkan melalui aplikasi/);
 assert.match(app, /Nomor, token, jumlah tiket, dan QR tetap sama/);
 assert.match(app, /Anda harus mengimpor hasil baru sebelum membuka sesi kembali/);
-console.log('PASS frontend: konfigurasi 8/65/100/999, CSV/XLSX, boolean Excel, jumlah terpilih dinamis, validasi tiket, source light-only, reset dengan konfirmasi dan penjelasan dampak.');
+assert.match(app, /if \(!password \|\| !isConfigured \|\| sessionDisabled \|\| !autoRefresh\) return;/);
+assert.match(app, /const stop = pollAdminStats\(password, response => \{\s*setData\(response\);\s*setSyncError\(''\);/);
+assert.match(app, /const send = useCallback\(async[^\n]*\n\s*stopPollingRef\.current\?\.\(\);/);
+assert.match(app, /aria-pressed=\{autoRefresh\}/);
+assert.match(app, /Jeda pembaruan otomatis/);
+assert.match(app, /<Notice type="error">\{syncError\}<\/Notice>/);
+console.log('PASS frontend: konfigurasi tiket/terpilih dinamis, CSV/XLSX, boolean Excel, validasi tiket, source light-only, reset terkonfirmasi, integrasi polling admin dan tombol jeda.');

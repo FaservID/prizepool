@@ -13,6 +13,7 @@ async function browser({ random = () => 0.5, submitError, appendError, configure
   let requestId = 0;
   const timers = new Map();
   const listeners = new Set();
+  const visibilityListeners = new Set();
   const nodes = new Set();
   const submissions = [];
   const scheduled = [];
@@ -29,6 +30,9 @@ async function browser({ random = () => 0.5, submitError, appendError, configure
     removeEventListener(type, listener) { assert.equal(type, 'message'); listeners.delete(listener); },
   };
   const document = {
+    hidden: false,
+    addEventListener(type, listener) { assert.equal(type, 'visibilitychange'); visibilityListeners.add(listener); },
+    removeEventListener(type, listener) { assert.equal(type, 'visibilitychange'); visibilityListeners.delete(listener); },
     body: {
       append(...elements) {
         for (const element of elements) nodes.add(element);
@@ -50,7 +54,7 @@ async function browser({ random = () => 0.5, submitError, appendError, configure
       };
     },
   };
-  const context = vm.createContext({ window, document, URL, Math: Object.assign(Object.create(Math), { random }),
+  const context = vm.createContext({ window, document, URL, AbortController, Math: Object.assign(Object.create(Math), { random }),
     crypto: { randomUUID: () => `request-${++requestId}` },
     __env: { VITE_GAS_URL: configured ? apiUrl : '', BASE_URL: '/prizepool/' } });
   const module = new vm.SourceTextModule(source, { context });
@@ -76,8 +80,12 @@ async function browser({ random = () => 0.5, submitError, appendError, configure
     assert.equal(listeners.size, 0, 'message listener removed');
     assert.equal(timers.size, pendingTimers, 'only expected timers remain');
   };
-  return { api: module.namespace, window, submissions, scheduled, nodes, timers, listeners,
-    next, flush, emit, clean };
+  function visible(value) {
+    document.hidden = !value;
+    for (const listener of [...visibilityListeners]) listener();
+  }
+  return { api: module.namespace, window, submissions, scheduled, nodes, timers, listeners, visibilityListeners,
+    next, flush, emit, clean, visible };
 }
 
 for (const action of ['verify', 'publicInfo']) {
@@ -235,6 +243,117 @@ test('missing configuration fails before scheduling or creating DOM', async () =
   assert.equal(b.api.isConfigured, false);
   await assert.rejects(b.api.prizePoolRequest('verify'), /belum dikonfigurasi/);
   assert.equal(b.submissions.length, 0);
+  b.clean();
+});
+
+test('admin polling updates checked rows sequentially and cancels without late writes', async () => {
+  const b = await browser();
+  const updates = [];
+  const stop = b.api.pollAdminStats('admin-password', data => updates.push(data), assert.fail);
+  assert.equal(b.submissions.length, 0);
+  assert.equal(await b.next(), 5000);
+  const first = b.submissions[0];
+  assert.equal(first.payload.action, 'adminStats');
+  assert.equal(first.payload.password, 'admin-password');
+  assert.equal(b.timers.size, 1, 'Only request timeout remains while poll is in flight');
+  b.emit(first, { ok: true, data: { checked: 0, tickets: [{ checkedAt: '' }] } });
+  await b.flush();
+  b.clean(1);
+  assert.equal(await b.next(), 5000);
+  b.emit(b.submissions[1], { ok: true, data: { checked: 1, tickets: [{ checkedAt: '2026-11-19T10:00:00Z' }] } });
+  await b.flush();
+  assert.equal(updates.length, 2);
+  assert.equal(updates[1].checked, 1);
+  assert.ok(updates[1].tickets[0].checkedAt);
+  await b.next();
+  const late = b.submissions[2];
+  stop();
+  await b.flush();
+  b.emit(late, { ok: true, data: { checked: 999 } });
+  late.listener({ origin: 'null', data: { type: 'NBSA_PRIZEPOOL_RESULT', requestId: late.requestId, ok: true, data: {} } });
+  await b.flush();
+  assert.equal(updates.length, 2, 'Stopped polling cannot overwrite mutation or logout state');
+  assert.equal(b.visibilityListeners.size, 0);
+  b.clean();
+});
+
+test('admin polling pauses hidden tabs and refreshes immediately on return', async () => {
+  const b = await browser();
+  b.visible(false);
+  const updates = [];
+  const errors = [];
+  const stop = b.api.pollAdminStats('password', data => updates.push(data), err => errors.push(err));
+  b.clean();
+  b.visible(true);
+  assert.equal(b.submissions.length, 1);
+  const hiddenRequest = b.submissions[0];
+  b.visible(false);
+  await b.flush();
+  b.clean();
+  b.emit(hiddenRequest, { ok: true, data: 'stale' });
+  b.visible(true);
+  assert.equal(b.submissions.length, 2);
+  b.emit(b.submissions[1], { ok: true, data: 'fresh' });
+  await b.flush();
+  assert.deepEqual(updates, ['fresh']);
+  assert.equal(errors.length, 0, 'Visibility cancellation is not a connection error');
+  b.clean(1);
+  b.visible(false);
+  b.clean();
+  stop();
+  assert.equal(b.visibilityListeners.size, 0);
+});
+
+test('admin polling backs off after failures and resets delay after recovery', async () => {
+  const b = await browser();
+  const errors = [];
+  const updates = [];
+  const stop = b.api.pollAdminStats('password', data => updates.push(data), err => errors.push(err));
+  for (const delay of [5000, 10000, 20000, 30000]) {
+    assert.equal(await b.next(), delay);
+    b.emit(b.submissions.at(-1), { ok: false, error: 'Server unavailable', retryable: true });
+    await b.flush();
+    b.clean(1);
+  }
+  assert.equal(errors.length, 4);
+  assert.equal(await b.next(), 30000);
+  b.emit(b.submissions.at(-1), { ok: true, data: { checked: 6 } });
+  await b.flush();
+  assert.equal(updates[0].checked, 6);
+  assert.equal(await b.next(), 5000);
+  assert.equal(b.submissions.length, 6);
+  stop();
+  await b.flush();
+  b.clean();
+});
+
+test('admin polling schedules no overlapping request when response times out', async () => {
+  const b = await browser();
+  const errors = [];
+  const stop = b.api.pollAdminStats('password', assert.fail, err => errors.push(err));
+  await b.next();
+  assert.equal(b.submissions.length, 1);
+  assert.equal(await b.next(), 30000);
+  assert.equal(b.submissions.length, 1, 'No interval request was created during transport timeout');
+  assert.equal(errors.length, 1);
+  assert.equal(await b.next(), 10000);
+  assert.equal(b.submissions.length, 2);
+  stop();
+  await b.flush();
+  b.clean();
+});
+
+test('aborted admin read cleans request resources and ignores late response', async () => {
+  const b = await browser();
+  const controller = new AbortController();
+  const result = b.api.prizePoolRequest('adminStats', {}, 'password', controller.signal);
+  const rejection = assert.rejects(result, { name: 'AbortError' });
+  controller.abort();
+  await rejection;
+  b.clean();
+  const beforeAbortedCall = b.submissions.length;
+  await assert.rejects(b.api.prizePoolRequest('adminStats', {}, 'password', controller.signal), { name: 'AbortError' });
+  assert.equal(b.submissions.length, beforeAbortedCall);
   b.clean();
 });
 

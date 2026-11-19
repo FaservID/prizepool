@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isConfigured, participantUrl, prizePoolRequest } from './api.js';
+import { isConfigured, participantUrl, pollAdminStats, prizePoolRequest } from './api.js';
 import {
   STATUS_NAMES,
   buildEoCsv,
@@ -156,6 +156,9 @@ function AdminPage({ refreshPublicInfo }) {
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [showResults, setShowResults] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const stopPollingRef = useRef(null);
   const [companyName, setCompanyName] = useState(() => {
     const saved = preference('nb_company_name', '');
     return saved === 'PT NUSANTARA BAKTI SEJAHTERA' ? '' : saved.slice(0, 80);
@@ -219,7 +222,21 @@ function AdminPage({ refreshPublicInfo }) {
   const lastNumber = String(ticketCount).padStart(3, '0');
   const sessionDisabled = busy || !!exporting;
 
+  useEffect(() => {
+    if (!password || !isConfigured || sessionDisabled || !autoRefresh) return;
+    const stop = pollAdminStats(password, response => {
+      setData(response);
+      setSyncError('');
+    }, () => setSyncError('Pembaruan otomatis gagal. Data terakhir tetap ditampilkan; mencoba lagi. Gunakan Segarkan data untuk memeriksa koneksi.'));
+    stopPollingRef.current = stop;
+    return () => {
+      stop();
+      stopPollingRef.current = null;
+    };
+  }, [password, sessionDisabled, autoRefresh]);
+
   const send = useCallback(async (action, args = {}, pass = password) => {
+    stopPollingRef.current?.();
     setBusy(true);
     setError('');
     setSuccess('');
@@ -227,6 +244,7 @@ function AdminPage({ refreshPublicInfo }) {
       const response = await prizePoolRequest(action, args, pass);
       setData(response);
       setTicketCountInput(String(response.maxParticipants ?? 65));
+      setSyncError('');
       refreshPublicInfo();
       return response;
     } catch (err) {
@@ -398,11 +416,13 @@ function AdminPage({ refreshPublicInfo }) {
           <div className="admin-top-bar">
             <p role="status">Status sesi: <strong>{STATUS_NAMES[data?.status] || data?.status}</strong></p>
             <div className="button-row">
+              <button type="button" className="btn btn-outline" aria-pressed={autoRefresh} disabled={sessionDisabled} onClick={() => { stopPollingRef.current?.(); setAutoRefresh(value => !value); setSyncError(''); }}>{autoRefresh ? 'Jeda pembaruan otomatis' : 'Aktifkan pembaruan otomatis'}</button>
               <button type="button" className="btn btn-outline" disabled={busy || !!exporting} onClick={() => send('adminStats').catch(() => {})}>{busy ? 'Memuat…' : 'Segarkan data'}</button>
-              <button type="button" className="text-button" disabled={busy || !!exporting} onClick={() => { setPassword(''); setData(null); setShowResults(false); setError(''); setSuccess(''); }}>Keluar</button>
+              <button type="button" className="text-button" disabled={busy || !!exporting} onClick={() => { stopPollingRef.current?.(); setPassword(''); setData(null); setShowResults(false); setError(''); setSuccess(''); setSyncError(''); setAutoRefresh(true); }}>Keluar</button>
             </div>
           </div>
           <Notice type="error">{error}</Notice><Notice type="success">{success}</Notice>
+          <Notice type="error">{syncError}</Notice>
           <dl className="stats-grid" aria-label="Jumlah tiket">
             <div><dt>Tiket tersedia</dt><dd>{data?.total ?? 0}<span> / {ticketCount}</span></dd></div>
             <div><dt>Tiket terpilih</dt><dd>{data?.selected ?? 0}<span> / {ticketCount}</span></dd></div>
@@ -475,7 +495,7 @@ function AdminPage({ refreshPublicInfo }) {
             </div>
           </section>
           <section className="panel" aria-labelledby="tickets-title">
-            <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket menggunakan nomor registrasi, tanpa mencatat nama karyawan.</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil' : 'Tampilkan hasil'}</button></div>
+            <div className="section-heading table-heading"><div><h2 id="tickets-title">Daftar tiket</h2><p>Tiket menggunakan nomor registrasi, tanpa mencatat nama karyawan. {autoRefresh ? 'Pembaruan otomatis aktif: data diminta setiap 5 detik setelah respons sebelumnya. Dijeda saat tab tersembunyi, proses admin, atau ekspor.' : 'Pembaruan otomatis dijeda. Gunakan Segarkan data untuk memperbarui tabel dan jumlah.'}</p></div><button type="button" className="text-button" aria-pressed={showResults} onClick={() => setShowResults(value => !value)}>{showResults ? 'Sembunyikan hasil' : 'Tampilkan hasil'}</button></div>
             <div className="table-toolbar"><div className="search-field"><label htmlFor="ticket-search">Cari nomor atau token</label><input id="ticket-search" className="input-field" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="052 atau nomor token" /></div><p className="field-help" role="status">{filtered.length} dari {data?.tickets?.length || 0} tiket</p></div>
             <div className="table-scroll" role="region" aria-label="Daftar tiket peserta, geser untuk melihat seluruh kolom" tabIndex={0}>
               <table><caption className="sr-only">Nomor registrasi, token pengecekan, status pengecekan, dan status terpilih</caption><thead><tr><th scope="col">Nomor</th><th scope="col">Token</th><th scope="col">Pengecekan</th><th scope="col">Status terpilih</th><th scope="col">Unduh</th></tr></thead><tbody>

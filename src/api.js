@@ -10,7 +10,8 @@ export const isConfigured =
   /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(API_URL) &&
   !API_URL.includes('PASTE_DEPLOYMENT_ID');
 
-export async function prizePoolRequest(action, fields = {}, password = '') {
+export async function prizePoolRequest(action, fields = {}, password = '', signal) {
+  signal?.throwIfAborted();
   if (!isConfigured) throw new Error('API Google Apps Script belum dikonfigurasi.');
   const canRetry = action === 'verify' || action === 'publicInfo';
   const attempts = canRetry ? 4 : 1;
@@ -19,7 +20,7 @@ export async function prizePoolRequest(action, fields = {}, password = '') {
       const delay = attempt === 0 ? Math.random() * 1500 : 1000 * 2 ** (attempt - 1) * (1 + Math.random());
       await new Promise(resolve => window.setTimeout(resolve, delay));
     }
-    const response = await requestOnce(action, fields, password, canRetry ? 15000 : 30000);
+    const response = await requestOnce(action, fields, password, canRetry ? 15000 : 30000, signal);
     if (response.ok) return response.data;
     if (!canRetry || response.retryable !== true || attempt === attempts - 1) {
       throw new Error(response.error || 'Server menolak permintaan.');
@@ -27,8 +28,9 @@ export async function prizePoolRequest(action, fields = {}, password = '') {
   }
 }
 
-function requestOnce(action, fields, password, timeout) {
+function requestOnce(action, fields, password, timeout, signal) {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     const requestId = crypto.randomUUID();
     const iframe = document.createElement('iframe');
     iframe.name = `pp_${requestId.replaceAll('-', '')}`;
@@ -62,8 +64,14 @@ function requestOnce(action, fields, password, timeout) {
       completed = true;
       window.clearTimeout(timer);
       window.removeEventListener('message', handleMessage);
+      signal?.removeEventListener('abort', handleAbort);
       form.remove();
       iframe.remove();
+    }
+    function handleAbort() {
+      if (completed) return;
+      cleanUp();
+      reject(signal.reason);
     }
     function handleMessage(evt) {
       const data = evt.data;
@@ -80,6 +88,7 @@ function requestOnce(action, fields, password, timeout) {
     }, timeout);
 
     window.addEventListener('message', handleMessage);
+    signal?.addEventListener('abort', handleAbort, { once: true });
     try {
       document.body.append(iframe, form);
       form.submit();
@@ -88,6 +97,54 @@ function requestOnce(action, fields, password, timeout) {
       reject(err);
     }
   });
+}
+
+// ponytail: polling 5 detik untuk Apps Script; push realtime memerlukan backend berlangganan.
+export function pollAdminStats(password, onData, onError) {
+  let timer;
+  let controller;
+  let stopped = false;
+  let delay = 5000;
+
+  async function refresh() {
+    if (stopped || document.hidden || controller) return;
+    const current = new AbortController();
+    controller = current;
+    try {
+      const data = await prizePoolRequest('adminStats', {}, password, current.signal);
+      if (!stopped && !current.signal.aborted) {
+        delay = 5000;
+        onData(data);
+      }
+    } catch (err) {
+      if (!stopped && !current.signal.aborted) {
+        delay = Math.min(delay * 2, 30000);
+        onError(err);
+      }
+    } finally {
+      if (controller === current) {
+        controller = null;
+        if (!stopped && !document.hidden) timer = window.setTimeout(refresh, delay);
+      }
+    }
+  }
+
+  function pause() {
+    window.clearTimeout(timer);
+    controller?.abort();
+    controller = null;
+  }
+  function visibilityChanged() {
+    pause();
+    if (!document.hidden && !stopped) refresh();
+  }
+  document.addEventListener('visibilitychange', visibilityChanged);
+  if (!document.hidden) timer = window.setTimeout(refresh, delay);
+  return () => {
+    stopped = true;
+    document.removeEventListener('visibilitychange', visibilityChanged);
+    pause();
+  };
 }
 
 export function participantUrl() {
